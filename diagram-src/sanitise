@@ -1,0 +1,2 @@
+
+for file in *.xml ; do sed "s/userAgent=\"[^\"]*\"/userAgent=\"\"/g" "$file" > "$file.new" && mv -i "$file" "$file.bak" && mv -i "$file.new" "$file"; done
