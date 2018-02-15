@@ -1,13 +1,13 @@
 import keras
 
-class RecurrentUnit:
-    
-    def __init__(self, loop_size, name=None):
+class Builder:
+    """Implements building and rebuilding models from cached layers"""
+
+    def __init__(self, name=None):
         self.name = name
-        self.loop_size = loop_size
         self._shared_layers = {}
         self._layer_counter = 0
-    
+
     def shared_layer(self, build_function, args, kwargs):
         """Either create a layer shared between all units, or return one from the cache"""
         key = self._layer_counter
@@ -18,28 +18,52 @@ class RecurrentUnit:
         
         self._layer_counter += 1
         return self._shared_layers[key]
-    
-    def get_unit(self, external_input, internal_input):
-        """Build a unit using two inputs and return two outputs"""
+
+    def build(self, *args, **kwargs):
         self._layer_counter = 0
-        self.build(external_input, internal_input)
+        self._build_impl(*args, **kwargs)
+
+
+class RecurrentUnit(Builder):
     
-    def build(self, external_input, internal_input): # Abstract method
+    def __init__(self, units, **kwargs):
+        self.units = units
+        super().__init__(**kwargs)
+       
+    def _build_impl(self, external_input, internal_input): # Abstract method
         """Implements building the unit itself using shared_layer()"""
         
         # Vanilla RNN
         
-        x = self.shared_layer(keras.layers.concatenate, ([internal_input, external_input]), {'name': 'concat'})
-        x = self.shared_layer(keras.layers.Dense, (), {'units': self.loop_size, 'name': 'dense'})(x)
+        if internal_input is not None:
+            x = self.shared_layer(keras.layers.concatenate, ([external_input, internal_input]), {'name': 'concat'})
+        # TODO not arbitrary connections!!
+        x = self.shared_layer(keras.layers.Dense, (,), {'units': self.units, 'name': 'dense'})(x)
         x = self.shared_layer(keras.layers.Activation, ('relu'), {'name': 'relu'})(x)
 
         # Split layer: https://github.com/keras-team/keras/issues/890
-        return (x, x)
+        return (x, x) # (external_output, internal_output)
 
 
-class Model:
+class Model(Builder):
     
-    def __init__(self, superloop_models, superloop_sizes):
+    def __init__(self, superloop_models, superloop_sizes, **kwargs):
+        super().__init__(**kwargs)
+
+    def initialise(self): # Abstract method
+        self.recurrent_layers_num = 5
+        self.recurrent_units_num = 3
+        self.recurrent_layers = [RecurrentUnit(units=self.recurrent_units_num, name="Recur{}".format(layernix)) 
+            for layerix in range(self.recurrent_layers_num)]
+        self.recurrent_internal = [None for layerix in range(self.recurrent_layers_num)]
+
+    def _build_impl(self, input, superloop_input): # Abstract method
+        """Implements building the mode"""
+
+        x = self.shared_layer(keras.layers.concatenate, ([input, superloop_input]), {'name': 'main_concat'})
+        for layernix in range(self.recurrent_layers_num):
+            x = self.shared_layer(keras.layers.Dense, (,), {'units': self.recurrent_units_num, 'name': "main_dense".format(layerix) })(x)
+            x, self.recurrent_internal[layerix] = self.recurrent_layers[layerix].build(x, self.recurrent_internal[layerix])
 
 
 
