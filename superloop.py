@@ -6,7 +6,9 @@ import os
 
 
 class Builder:
-    """Implements building and rebuilding models from cached layers. Abstract class"""
+    """(Re)Builds models from cached layers. Used to build unrolled models
+    and set up weight sharing between the same layers in different timesteps.
+    Abstract class"""
 
     def __init__(self, name=None):
         self.name = name # Name of the model
@@ -62,34 +64,40 @@ class RecurrentUnit(Builder):
     def _build_impl(self, external_input):
         """Implements building the unit itself using shared_layer()"""
         
-        # We implement a very simple gated unit here
-        #
-        # Dense layer
-        # Split the tensor into Input and Control
-        # F = Sigmoid(Control)
-        # Output = F*Internal + (1-F)*ReLU(Input)
-        
-        dense = self.shared_layer(keras.layers.Dense, (), {'units':self.units*2, 'name':'Dense'})(external_input)
+        # We implement a simple gated unit here
+        # The output and next hidden/internal value are controlled by F:
+        # Output = F*Internal + (1-F)*ReLU(W3*ExternalInput)
+        # (the activation here depends more on the external architecture)
+        # (alternatively, instead of ExternalInput we could use a combination 
+        # of the internal state and the external input)
+        # where F is a function of both the external input and the internal state
+        # F = Sigmoid(W1*Internal + W2*ExternalInput)
+        # (the activation here needs to return a number in [0,1])
 
-        f = self.shared_layer(CropLayer, (0, self.units), {'name':'CropF'})(dense) # Probably no need to use shared_layer but the layer will be named properly
+        allin = keras.layers.concatenate(
+            [external_input, self.internal_var],
+            name="{}/ConcatIn{}".format(self.name, self._build_counter)
+        )
+        
+        f = self.shared_layer(keras.layers.Dense, (), {'units':self.units, 'name':'DenseCtrl'})(allin) # W1, W2
         f = self.shared_layer(keras.layers.Activation, ('hard_sigmoid',), {'name':'Sigm'})(f)
-        # f = PrintTensor("f=sigmoid(ctrl)")(f) # DEBUG
+        # f = PrintTensor("f=sigmoid()")(f) # DEBUG
         
         ones = self.shared_layer(keras.layers.Lambda, ((lambda x: K.ones_like(x)),), {'name':'Ones'})(f)
-        # Unfortunately, keras.layers.Subtract &c. don't have names, so the graph is unusable
+        # Unfortunately, keras.layers.Subtract &c. don't have names, so the graph is unusable. We use Lambdas instead
         ## onesf = self.shared_layer(keras.layers.Subtract, (), {})([ones, f])
         onesf = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]-x[1]),), {'name':'Sub'})([ones, f])
         # onesf = PrintTensor("1-f")(onesf) # DEBUG
 
-        inp = self.shared_layer(CropLayer, (self.units, self.units*2), {'name':'CropIn'})(dense)
+        inp = self.shared_layer(keras.layers.Dense, (), {'units':self.units, 'name':'DenseIn'})(external_input) # W3
         inp = self.shared_layer(keras.layers.Activation, ('relu',), {'name':'ReLU'})(inp)
         # inp = PrintTensor("relu(inp)")(inp) # DEBUG
         ## inp = keras.layers.Multiply()([onesf, inp])
-        inp = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]*x[1]),), {'name':'MultInp'})([onesf, inp])
+        inp = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]*x[1]),), {'name':'MultIn'})([onesf, inp])
         # inp = PrintTensor("(1-f)*relu(inp)")(inp) # DEBUG
 
         ## internal = self.shared_layer(keras.layers.Multiply, (), {})([f, self.internal_var])
-        internal = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]*x[1]),), {'name':'MultInt'})([f, self.internal_var])
+        internal = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]*x[1]),), {'name':'MultH'})([f, self.internal_var])
         ## out = self.shared_layer(keras.layers.Add, (), {})([inp, internal])
         out = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]+x[1]),), {'name':'Add'})([inp, internal])
 
@@ -118,7 +126,7 @@ class SuperLoopModel(Builder):
 
         
 class Model(Builder):
-    """Builds the model in one timestep"""
+    """Builds the full model in one timestep"""
     
     def __init__(self, **kwargs):
 
@@ -154,12 +162,6 @@ class Model(Builder):
         )
         
         for layerix in range(self.config['recurrent_layers']):
-
-            x = self.shared_layer(keras.layers.Dense, (), {
-                'units': self.config['recurrent_units'], 
-                'name': "Dense{}".format(layerix) 
-            })(x)
-
             x = self.recurrent_layers[layerix].build(x)
                 
         self.superloop_model.build(x) # TODO split
