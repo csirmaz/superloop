@@ -46,7 +46,9 @@ def CropLayer(start, end, step=1, name=None):
     # Could use K.slice but unsure how to manage batch dimension
 
 def PrintTensor(message):
+    """Create a layer that prints the tensor"""
     return keras.layers.Lambda(lambda x: K.print_tensor(x, message=message))
+
 
 class RecurrentUnit(Builder):
     """Builds a layer of recurrent units"""
@@ -66,13 +68,13 @@ class RecurrentUnit(Builder):
         
         # We implement a simple gated unit here
         # The output and next hidden/internal value are controlled by F:
-        # Output = F*Internal + (1-F)*ReLU(W3*ExternalInput)
-        # (the activation here depends more on the external architecture)
-        # (alternatively, instead of ExternalInput we could use a combination 
+        #   Output = F*Internal + (1-F)*ReLU(W3*ExternalInput)
+        # (The activation here depends more on the external architecture)
+        # (Alternatively, instead of ExternalInput we could use a combination 
         # of the internal state and the external input)
         # where F is a function of both the external input and the internal state
-        # F = Sigmoid(W1*Internal + W2*ExternalInput)
-        # (the activation here needs to return a number in [0,1])
+        #   F = Sigmoid(W1*Internal + W2*ExternalInput)
+        # (The activation here needs to return a number in [0,1])
 
         allin = keras.layers.concatenate(
             [external_input, self.internal_var],
@@ -106,72 +108,112 @@ class RecurrentUnit(Builder):
 
 
 class SuperLoopModel(Builder):
-    """Builds the model used in the superloop"""
+    """Builds a model used in the superloop. Abstract class."""
     
-    def __init__(self, **kwargs):
-        self.outputs = 4 # Number of outputs. We need to know this in advance.
+    def __init__(self, inputs, outputs, **kwargs):
+        self.outputs = outputs # Number of outputs (1D tensor). We need to know this in advance.
+        self.inputs = inputs # Number of inputs (1D tensor)
+
         super().__init__(**kwargs)
+
         # Use this instead of this model's output in the first timestep
-        ## self.out = keras.layers.Input(tensor=keras.backend.zeros((self.outputs)), name=self.name + '.ZeroIn')
         self.first_out = keras.layers.Input(shape=(self.outputs,), name=self.name + '/FirstOut')
         self.out = self.first_out # Always contains the output of the latest build
 
     def _build_impl(self, input): # TODO Abstract method
         """Implements building the unit itself using shared_layer()"""
         
-        x = self.shared_layer(keras.layers.Dense, (), {'units': self.outputs, 'name': 'dense'})(input)
-        
-        self.out = x
+        self.out = self._build_impl_impl(input)
         return self.out # output
-
         
+    
+    @abc.abstractmethod
+    def _build_impl_impl(self, input):
+        """Actually build the model"""
+
+
+class ShortTermMemory(SuperLoopModel):
+    
+    def __init__(self, config, **kwargs):
+        self.register_width = config['register_width']
+        self.depth = config['depth']
+        super().__init__(
+            inputs=self.register_width + 2*self.depth, # store, recall
+            outputs=self.register_width,
+            **kwargs
+        )
+        self.memory = keras.layers.Input(shape=(self.register_width, self.depth), name=self.name + '/Memory') # TODO Register!
+        
+    def _build_impl_impl(self, input):
+        store = self.shared_layer(CropLayer, (), {'start':0, 'end':self.depth, 'name':"CropStore"})(input)
+        recall = self.shared_layer(CropLayer, (), {'start':self.depth, 'end':self.depth*2, 'name':"CropRecall"})(input)
+        data = self.shared_layer(CropLayer, (), {'start':self.depth*2, 'end':self.inputs, 'name':"CropData"})(input)
+
+        # memory = (1-store)*memory + store*data
+        # out = memory * recall
+        
+        return data
+
+
+CONFIG = {
+    'recurrent_layers': 5, # number of recurrent layers
+    'recurrent_units': 3, # number of recurrent units on each layer
+    'superloop_models': [ShortTermMemory], # classes used to build models used in the superloop
+    'ShortTermMemory': {
+        'register_width': 32,
+        'depth': 7,
+    }
+}
+
+
 class Model(Builder):
     """Builds the full model in one timestep"""
     
-    def __init__(self, **kwargs):
+    def __init__(self, config, **kwargs):
 
         super().__init__(**kwargs)
 
-        self.config = {
-            'recurrent_layers': 5, # number of recurrent layers
-            'recurrent_units': 3, # number of recurrent units on each layer
-        }
-
         # Array of builders for the recurrent layers
         self.recurrent_layers = [
-            RecurrentUnit(units=self.config['recurrent_units'], name="{}/Recur{}".format(self.name, layerix)) 
-            for layerix in range(self.config['recurrent_layers'])
+            RecurrentUnit(units=config['recurrent_units'], name="{}/Recur{}".format(self.name, layerix)) 
+            for layerix in range(config['recurrent_layers'])
         ]
         
-        # The external system connected via the superloop ("X")
-        self.superloop_model = SuperLoopModel(name="{}/Super".format(self.name))
+        # The external systems connected via the superloop ("X")
+        self.superloop_models = [
+            modelclass(name="{}/{}".format(self.name, modelclass), config=config[modelclass.__name__])
+            for modelclass in config['superloop_models']
+        ]
         
         
     def get_internal_inputs(self):
         """Return all the input placeholders automatically generated for the first timestep"""
         inputs = [l.first_in for l in self.recurrent_layers]
-        inputs.append(self.superloop_model.first_out)
+        inputs.extend(s.first_out for s in self.superloop_models)
         return inputs
         
 
-    def _build_impl(self, input): # TODO Abstract method
+    def _build_impl(self, input):
         """Implements building the model in one timestep"""
+        inputs = [input]
+        inputs.extend(s.out for s in self.superloop_models]
         x = keras.layers.concatenate(
-            [input, self.superloop_model.out],
+            inputs,
             name="{}/ConcatSuper{}".format(self.name, self._build_counter)
         )
         
         for layerix in range(self.config['recurrent_layers']):
             x = self.recurrent_layers[layerix].build(x)
-                
-        self.superloop_model.build(x) # TODO split
+        
+        for s in self.superloop_models:        
+            s.build(x) # TODO split x
         return x # output
 
 
 
 timesteps = 3
 inputs = [keras.layers.Input(shape=(7,), name="Main/StepInput{}".format(i)) for i in range(timesteps)]
-mymodelbuilder = Model(name="Main")
+mymodelbuilder = Model(name="Main", config=CONFIG)
 outputs = [None]*timesteps
 
 for timestep in range(timesteps):
