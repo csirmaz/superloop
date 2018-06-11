@@ -16,23 +16,30 @@ class Builder:
         self._layer_counter = 0
         self._build_counter = 0
 
-    def shared_layer(self, build_function, args, kwargs):
+    def shared_layer(self, build_function, args, kwargs, skip_cache=False):
         """Either create a layer shared between all units, or return one from the cache"""
         key = self._layer_counter
-        if key not in self._shared_layers:
+        if skip_cache or key not in self._shared_layers:
             # Build the layer
             if self.name and ('name' in kwargs): # Generate a name
                 kwargs['name'] = "{}/{}.{}".format(self.name, self._layer_counter, kwargs['name'])
-            self._shared_layers[key] = build_function(*args, **kwargs)
+            if skip_cache:
+                return build_function(*args, **kwargs)
+            else:
+                self._shared_layers[key] = build_function(*args, **kwargs)
         
         self._layer_counter += 1
         return self._shared_layers[key]
 
+    def skip_layer(self, count=1):
+        self._layer_counter += count
+
     def build(self, *args, **kwargs):
         """Build the model"""
         self._layer_counter = 0
+        r = self._build_impl(*args, **kwargs)
         self._build_counter += 1
-        return self._build_impl(*args, **kwargs)
+        return r
 
     @abc.abstractmethod
     def _build_impl(self):
@@ -44,6 +51,16 @@ def CropLayer(start, end, step=1, name=None):
     # See https://github.com/keras-team/keras/issues/890
     return keras.layers.Lambda(lambda x: x[:, start:end:step], output_shape=(int((end-start)/step),), name=name)
     # Could use K.slice but unsure how to manage batch dimension
+
+def ExtendWithZeros(size_added, name=None):
+    """Creates a layer that adds size_added 0's to a 1D tensor in all batches"""
+    # See https://stackoverflow.com/questions/46465813/creating-constant-value-in-keras
+    def func(x):
+        zeros = K.zeros((1, size_added))
+        batch_size = K.shape(x)[0]
+        tiled_zeros = K.tile(zeros, (batch_size, 1))
+        return K.concatenate([x, tiled_zeros])
+    return keras.layers.Lambda(func, name=name)
 
 def PrintTensor(message):
     """Create a layer that prints the tensor"""
@@ -59,8 +76,7 @@ class RecurrentUnit(Builder):
         # The internal input to use in the next timestep
         # We use an input here as the first dimension (batch size) is not fixed,
         # so we cannot use a constant tensor.
-        self.first_in = keras.layers.Input(shape=(self.units,), name=self.name + '/FirstIn')
-        self.internal_var = self.first_in
+        self.internal_var = None
 
 
     def _build_impl(self, external_input):
@@ -76,11 +92,15 @@ class RecurrentUnit(Builder):
         #   F = Sigmoid(W1*Internal + W2*ExternalInput)
         # (The activation here needs to return a number in [0,1])
 
-        allin = keras.layers.concatenate(
-            [external_input, self.internal_var],
-            name="{}/ConcatIn{}".format(self.name, self._build_counter)
-        )
-        
+        if self._build_counter == 0:
+            allin = self.shared_layer(ExtendWithZeros, (), {'size_added':self.units, 'name':'ExtendZero'})(external_input)
+        else:
+            self.skip_layer(1)
+            allin = keras.layers.concatenate(
+                [external_input, self.internal_var],
+                name="{}/ConcatIn{}".format(self.name, self._build_counter)
+            )
+            
         f = self.shared_layer(keras.layers.Dense, (), {'units':self.units, 'name':'DenseCtrl'})(allin) # W1, W2
         f = self.shared_layer(keras.layers.Activation, ('hard_sigmoid',), {'name':'Sigm'})(f)
         # f = PrintTensor("f=sigmoid()")(f) # DEBUG
@@ -98,10 +118,14 @@ class RecurrentUnit(Builder):
         inp = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]*x[1]),), {'name':'MultIn'})([onesf, inp])
         # inp = PrintTensor("(1-f)*relu(inp)")(inp) # DEBUG
 
-        ## internal = self.shared_layer(keras.layers.Multiply, (), {})([f, self.internal_var])
-        internal = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]*x[1]),), {'name':'MultH'})([f, self.internal_var])
-        ## out = self.shared_layer(keras.layers.Add, (), {})([inp, internal])
-        out = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]+x[1]),), {'name':'Add'})([inp, internal])
+        if self._build_counter == 0:
+            out = inp
+            self.skip_layer(2)
+        else:
+            ## internal = self.shared_layer(keras.layers.Multiply, (), {})([f, self.internal_var])
+            internal = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]*x[1]),), {'name':'MultH'})([f, self.internal_var])
+            ## out = self.shared_layer(keras.layers.Add, (), {})([inp, internal])
+            out = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]+x[1]),), {'name':'Add'})([inp, internal])
 
         self.internal_var = out
         return out # external_output
@@ -116,9 +140,7 @@ class SuperLoopModel(Builder):
 
         super().__init__(**kwargs)
 
-        # Use this instead of this model's output in the first timestep
-        self.first_out = keras.layers.Input(shape=(self.outputs,), name=self.name + '/FirstOut')
-        self.out = self.first_out # Always contains the output of the latest build
+        self.out = None # Always contains the output of the latest build
 
     def _build_impl(self, input): # TODO Abstract method
         """Implements building the unit itself using shared_layer()"""
@@ -142,7 +164,7 @@ class ShortTermMemory(SuperLoopModel):
             outputs=self.register_width,
             **kwargs
         )
-        self.memory = keras.layers.Input(shape=(self.register_width, self.depth), name=self.name + '/Memory') # TODO Register!
+        self.memory = None
         
     def _build_impl_impl(self, input):
         store = self.shared_layer(CropLayer, (), {'start':0, 'end':self.depth, 'name':"CropStore"})(input)
@@ -156,6 +178,7 @@ class ShortTermMemory(SuperLoopModel):
 
 
 CONFIG = {
+    'model_outputs': 3,
     'recurrent_layers': 5, # number of recurrent layers
     'recurrent_units': 3, # number of recurrent units on each layer
     'superloop_models': [ShortTermMemory], # classes used to build models used in the superloop
@@ -181,33 +204,48 @@ class Model(Builder):
         
         # The external systems connected via the superloop ("X")
         self.superloop_models = [
-            modelclass(name="{}/{}".format(self.name, modelclass), config=config[modelclass.__name__])
+            modelclass(name="{}/{}".format(self.name, modelclass.__name__), config=config[modelclass.__name__])
             for modelclass in config['superloop_models']
         ]
+        
+        self.outputs = config['model_outputs']
+        self.all_outputs = self.outputs + sum(s.inputs for s in self.superloop_models)
         
         
     def get_internal_inputs(self):
         """Return all the input placeholders automatically generated for the first timestep"""
-        inputs = [l.first_in for l in self.recurrent_layers]
-        inputs.extend(s.first_out for s in self.superloop_models)
-        return inputs
+        # TODO delete
+        return []
         
 
     def _build_impl(self, input):
         """Implements building the model in one timestep"""
-        inputs = [input]
-        inputs.extend(s.out for s in self.superloop_models]
-        x = keras.layers.concatenate(
-            inputs,
-            name="{}/ConcatSuper{}".format(self.name, self._build_counter)
-        )
         
-        for layerix in range(self.config['recurrent_layers']):
-            x = self.recurrent_layers[layerix].build(x)
+        if self._build_counter == 0:
+            super_inputs = sum(s.outputs for s in self.superloop_models)
+            x = self.shared_layer(ExtendWithZeros, (), {'size_added':super_inputs, 'name':'ExtendZero'})(input)
+        else:
+            inputs = [input]
+            inputs.extend(s.out for s in self.superloop_models)
+            x = keras.layers.concatenate(
+                inputs,
+                name="{}/ConcatSuper{}".format(self.name, self._build_counter)
+            )
+            self.skip_layer(1)
         
+        for rlayer in self.recurrent_layers:
+            x = rlayer.build(x)
+            
+        x = self.shared_layer(keras.layers.Dense, (), {
+            'units': self.all_outputs, 
+            'name':'DenseFinal'
+        })(x)
+
+        start = self.outputs
         for s in self.superloop_models:        
-            s.build(x) # TODO split x
-        return x # output
+            s.build(self.shared_layer(CropLayer, (), {'start':start, 'end':start+s.inputs, 'name':"Crop{}".format(type(s).__name__)})(x))
+            start += s.inputs
+        return self.shared_layer(CropLayer, (), {'start':0, 'end':self.outputs, 'name':'CropOut'})(x) # output
 
 
 
