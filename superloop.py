@@ -1,6 +1,7 @@
 import abc
 import keras
 from keras import backend as K
+import tensorflow as tf
 import numpy as np
 import os
 
@@ -62,6 +63,10 @@ def ExtendWithZeros(size_added, name=None):
         return K.concatenate([x, tiled_zeros])
     return keras.layers.Lambda(func, name=name)
 
+def OneMinus(name=None):
+    """Creates a layer that computes (1-x)"""
+    return keras.layers.Lambda((lambda x: K.ones_like(x) - x), name=name)
+
 def PrintTensor(message):
     """Create a layer that prints the tensor"""
     return keras.layers.Lambda(lambda x: K.print_tensor(x, message=message))
@@ -105,10 +110,8 @@ class RecurrentUnit(Builder):
         f = self.shared_layer(keras.layers.Activation, ('hard_sigmoid',), {'name':'Sigm'})(f)
         # f = PrintTensor("f=sigmoid()")(f) # DEBUG
         
-        ones = self.shared_layer(keras.layers.Lambda, ((lambda x: K.ones_like(x)),), {'name':'Ones'})(f)
         # Unfortunately, keras.layers.Subtract &c. don't have names, so the graph is unusable. We use Lambdas instead
-        ## onesf = self.shared_layer(keras.layers.Subtract, (), {})([ones, f])
-        onesf = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]-x[1]),), {'name':'Sub'})([ones, f])
+        onesf = self.shared_layer(OneMinus, (), {'name':'OneMinus'})(f)
         # onesf = PrintTensor("1-f")(onesf) # DEBUG
 
         inp = self.shared_layer(keras.layers.Dense, (), {'units':self.units, 'name':'DenseIn'})(external_input) # W3
@@ -170,11 +173,42 @@ class ShortTermMemory(SuperLoopModel):
         store = self.shared_layer(CropLayer, (), {'start':0, 'end':self.depth, 'name':"CropStore"})(input)
         recall = self.shared_layer(CropLayer, (), {'start':self.depth, 'end':self.depth*2, 'name':"CropRecall"})(input)
         data = self.shared_layer(CropLayer, (), {'start':self.depth*2, 'end':self.inputs, 'name':"CropData"})(input)
+        
+        ## TODO use lambda?
+        store = self.shared_layer(keras.layers.Softmax, (), {'name':'SM'})(store)
+        recall = self.shared_layer(keras.layers.Softmax, (), {'name':'SM'})(recall)
 
         # memory = (1-store)*memory + store*data
-        # out = memory * recall
+        # out = recall*memory
         
-        return data
+        # storing = store*data
+        # (depth) (width) --> (depth,1) (1,width) --> (depth,width)
+        storing = self.shared_layer(keras.layers.Lambda, ((
+            lambda x: tf.matmul(K.expand_dims(x[0], axis=-1), K.expand_dims(x[1], axis=-2))
+        ),), {'name':'Storing'})([store, data])
+        
+        # Calculation for retain*memory - each register is multiplied by a scalar in the retain=(1-store) vector
+        def retain_calc(x):
+            _retain = K.expand_dims(x[0], axis=-1) # (depth) -> (depth,1)
+            # We shouldn't need the below as multiplication will broadcast https://docs.scipy.org/doc/numpy/user/basics.broadcasting.html
+            # _retain = K.repeat_elements(_retain, self.register_width, axis=-1) # (depth,1) -> (depth,width)
+            return _retain*x[1] # element-wise multiplication
+        
+        if self._build_counter == 0:
+            self.memory = storing
+            self.skip_layer(3)
+        else:
+            mstore = self.shared_layer(OneMinus, (), {'name':'OneMinus'})(store)
+            # retain = (1-store)*memory
+            retain = self.shared_layer(keras.layers.Lambda, (retain_calc,), {'name':'Retain'})([mstore, self.memory])
+            self.memory = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]+x[1]),), {'name':'Add'})([retain, storing])
+        
+        # recalled = recall*memory
+        # (depth) (depth,width) --> (1,depth) (depth,width) --> (1,width) --> (width)
+        recalled = self.shared_layer(keras.layers.Lambda, ((
+            lambda x: K.squeeze(tf.matmul(K.expand_dims(x[0], axis=-2), x[1]), axis=1)
+        ),), {'name':'Recall'})([recall, self.memory])
+        return recalled
 
 
 CONFIG = {
