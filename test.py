@@ -26,7 +26,7 @@ mymodelbuilder = Model(name="Main", config=CONFIG)
 outputs = [None]*timesteps
 
 for timestep in range(timesteps):
-    outputs[timestep] = mymodelbuilder.build(inputs[timestep])
+    outputs[timestep] = mymodelbuilder.build(inputs[timestep], skip_superloop=(timestep == timesteps-1))
 
 model = keras.models.Model(inputs=inputs, outputs=outputs)
 model.compile(loss='categorical_crossentropy',

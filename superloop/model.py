@@ -85,7 +85,6 @@ class SuperLoopModel(Builder):
         self.out = self._build_impl_impl(input)
         return self.out # output
         
-    
     @abc.abstractmethod
     def _build_impl_impl(self, input):
         """Actually build the model"""
@@ -113,7 +112,7 @@ class Model(Builder):
         self.outputs = config['model_outputs']
         self.all_outputs = self.outputs + sum(s.inputs for s in self.superloop_models)
         
-    def _build_impl(self, input):
+    def _build_impl(self, input, skip_superloop=False):
         """Implements building the model in one timestep"""
         
         if self._build_counter == 0:
@@ -130,6 +129,9 @@ class Model(Builder):
         
         for rlayer in self.recurrent_layers:
             x = rlayer.build(x)
+            
+        if skip_superloop:
+            return x
             
         x = self.shared_layer(keras.layers.Dense, (), {
             'units': self.all_outputs, 

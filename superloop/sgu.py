@@ -2,7 +2,7 @@ import keras
 from keras import backend as K
 import tensorflow as tf
 
-from .model import Builder, ExtendWithZeros
+from .model import Builder, ExtendWithZeros, PrintTensor
 
 
 class SGU(Builder):
