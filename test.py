@@ -22,9 +22,9 @@ CONFIG = {
     }
 }
 
-(inputs, outputs) = superloop.build_model(CONFIG)
+(input, outputs) = superloop.build_model(CONFIG)
 
-model = keras.models.Model(inputs=inputs, outputs=outputs)
+model = keras.models.Model(inputs=input, outputs=outputs)
 model.compile(loss='categorical_crossentropy',
               optimizer='rmsprop',
               metrics=['accuracy'])
@@ -48,7 +48,7 @@ class DataIterator:
     
     def __init__(self):
         # zero tensors for each input
-        self.ins = [np.zeros((batch_size, t.shape[1])) for t in inputs]
+        self.ins = np.zeros((batch_size, input.shape[1], input.shape[2]))
         self.outs = [np.zeros((batch_size, t.shape[1])) for t in outputs]
     
     def __next__(self):

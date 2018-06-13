@@ -176,14 +176,18 @@ def build_model(config):
         }
     """
     
-    inputs = [
-        keras.layers.Input(shape=(config['model_inputs'],), name="{}/StepInput{}".format(config['model_name'], i)) 
-        for i in range(config['timesteps'])
-    ]
+    input = keras.layers.Input(shape=(config['timesteps'], config['model_inputs']), name="{}/Input".format(config['model_name']))
+    
     builder = Model(name=config['model_name'], config=config)
     outputs = [None] * config['timesteps']
     
     for timestep in range(config['timesteps']):
-        outputs[timestep] = builder.build(inputs[timestep], skip_superloop=(timestep == config['timesteps']-1))
+        outputs[timestep] = builder.build(
+            keras.layers.Lambda( # split input tensor
+                lambda x: x[:, timestep, :],
+                name="{}/CropInput{}".format(config['model_name'], timestep)
+            )(input),
+            skip_superloop=(timestep == config['timesteps']-1)
+        )
         
-    return (inputs, outputs)
+    return (input, outputs)
