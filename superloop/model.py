@@ -143,19 +143,22 @@ class Model(Builder):
         for rlayer in self.recurrent_layers:
             x = rlayer.build(x)
             
-        if skip_superloop:
-            return x
-            
         x = self.shared_layer(keras.layers.Dense, (), {
             'units': self.all_outputs, 
             'name':'DenseFinal'
         })(x)
+        
+        output = self.shared_layer(CropLayer, (), {'start':0, 'end':self.outputs, 'name':'CropOut'})(x) # output
+
+        if skip_superloop:
+            return output
 
         start = self.outputs
         for s in self.superloop_models:        
             s.build(self.shared_layer(CropLayer, (), {'start':start, 'end':start+s.inputs, 'name':"Crop{}".format(type(s).__name__)})(x))
             start += s.inputs
-        return self.shared_layer(CropLayer, (), {'start':0, 'end':self.outputs, 'name':'CropOut'})(x) # output
+
+        return output
 
 
 def build_model(config):
@@ -182,12 +185,19 @@ def build_model(config):
     outputs = [None] * config['timesteps']
     
     for timestep in range(config['timesteps']):
-        outputs[timestep] = builder.build(
+        o = builder.build(
             keras.layers.Lambda( # split input tensor
                 lambda x: x[:, timestep, :],
                 name="{}/CropInput{}".format(config['model_name'], timestep)
             )(input),
             skip_superloop=(timestep == config['timesteps']-1)
         )
+        outputs[timestep] = keras.layers.Lambda(
+            lambda x: K.expand_dims(o, axis=-2), # (outputs) -> (1,outputs)
+            name="{}/ExpandOut{}".format(config['model_name'], timestep)
+        )(o)
         
-    return (input, outputs)
+    # Merge outputs
+    output = keras.layers.Concatenate(axis=-2, name="{}/ConcatOut".format(config['model_name']))(outputs)
+        
+    return (input, output)
