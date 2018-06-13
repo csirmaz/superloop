@@ -134,10 +134,13 @@ class Model(Builder):
         else:
             inputs = [input]
             inputs.extend(s.out for s in self.superloop_models)
-            x = keras.layers.concatenate(
-                inputs,
-                name="{}/ConcatSuper{}".format(self.name, self._build_counter)
-            )
+            if len(inputs) > 1:
+                x = keras.layers.concatenate(
+                    inputs,
+                    name="{}/ConcatSuper{}".format(self.name, self._build_counter)
+                )
+            else:
+                x = inputs[0]
             self.skip_layer(1)
         
         for rlayer in self.recurrent_layers:
