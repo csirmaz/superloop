@@ -14,6 +14,9 @@ class Builder:
         self._shared_layers = {} # layer cache, keyed on _layer_counter
         self._layer_counter = 0
         self._build_counter = 0
+        
+    def generate_name(self, name):
+        return "{}/{}.{}".format(self.name, self._layer_counter, name)
 
     def shared_layer(self, build_function, args, kwargs, skip_cache=False):
         """Either create a layer shared between all units, or return one from the cache"""
@@ -21,7 +24,7 @@ class Builder:
         if skip_cache or key not in self._shared_layers:
             # Build the layer
             if self.name and ('name' in kwargs): # Generate a name
-                kwargs['name'] = "{}/{}.{}".format(self.name, self._layer_counter, kwargs['name'])
+                kwargs['name'] = self.generate_name(kwargs['name'])
             if skip_cache:
                 return build_function(*args, **kwargs)
             else:
@@ -124,9 +127,12 @@ class Model(Builder):
         
         self.outputs = config['model_outputs']
         self.all_outputs = self.outputs + sum(s.inputs for s in self.superloop_models)
+
         
     def _build_impl(self, input, skip_superloop=False):
         """Implements building the model in one timestep"""
+        
+        print("Building timestep {}...".format(self._build_counter))
         
         if self._build_counter == 0:
             super_inputs = sum(s.outputs for s in self.superloop_models)

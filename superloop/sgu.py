@@ -16,7 +16,7 @@ class SGU(Builder):
         # so we cannot use a constant tensor.
         self.internal_var = None
 
-
+    
     def _build_impl(self, external_input):
         """Implements building the unit itself using shared_layer()"""
         
@@ -39,26 +39,24 @@ class SGU(Builder):
                 name="{}/ConcatIn{}".format(self.name, self._build_counter)
             )
             
-        f = self.shared_layer(keras.layers.Dense, (), {'units':self.units, 'name':'DenseCtrl'})(allin) # W1, W2
-        f = self.shared_layer(keras.layers.Activation, ('hard_sigmoid',), {'name':'Sigm'})(f)
+        f = self.shared_layer(keras.layers.Dense, (), 
+            {'units':self.units, 'activation':'hard_sigmoid', 'name':'DenseCtrl'})(allin) # W1, W2
         # f = PrintTensor("f=sigmoid()")(f) # DEBUG
         
         # Unfortunately, keras.layers.Subtract &c. don't have names, so the graph is unusable. We use Lambdas instead
-        inp = self.shared_layer(keras.layers.Dense, (), {'units':self.units, 'name':'DenseIn'})(external_input) # W3
-        inp = self.shared_layer(keras.layers.Activation, ('relu',), {'name':'ReLU'})(inp)
+        inp = self.shared_layer(keras.layers.Dense, (), 
+            {'units':self.units, 'activation':'relu', 'name':'DenseIn'})(external_input) # W3
         # inp = PrintTensor("relu(inp)")(inp) # DEBUG
-        # We can do 1-x[0] due to broadcasting
-        inp = self.shared_layer(keras.layers.Lambda, ((lambda x: (1.0 - x[0]) * x[1]),), {'name':'MinMultIn'})([f, inp])
-        # inp = PrintTensor("(1-f)*relu(inp)")(inp) # DEBUG
-
+        
         if self._build_counter == 0:
-            out = inp
-            self.skip_layer(2)
+            # (1-f)*inp
+            # We can do 1-x[0] due to broadcasting
+            out = self.shared_layer(keras.layers.Lambda, ((lambda x: (1.0 - x[0]) * x[1]),), {'name':'nF_Inp'})([f, inp])
+            self.skip_layer(1) # Order is important - Cache the correct layer
         else:
-            ## internal = self.shared_layer(keras.layers.Multiply, (), {})([f, self.internal_var])
-            internal = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]*x[1]),), {'name':'MultH'})([f, self.internal_var])
-            ## out = self.shared_layer(keras.layers.Add, (), {})([inp, internal])
-            out = self.shared_layer(keras.layers.Lambda, ((lambda x: x[0]+x[1]),), {'name':'Add'})([inp, internal])
+            self.skip_layer(1) # Order is important - Cache the correct layer
+            # (1-f)*inp + f*internal
+            out = self.shared_layer(keras.layers.Lambda, ((lambda x: (1.0-x[0])*x[1] + x[0]*x[2]),), {'name':'nF_Inp_F_Int'})([f, inp, self.internal_var])
 
         self.internal_var = out
         return out # external_output
