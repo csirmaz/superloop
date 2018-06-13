@@ -4,6 +4,7 @@ import tensorflow as tf
 
 from .model import Builder, ExtendWithZeros, PrintTensor
 
+# TODO implement as layer? https://keras.io/layers/writing-your-own-keras-layers/
 
 class SGU(Builder):
     """ Simple Gated Unit. Builds a layer of recurrent units."""
