@@ -4,29 +4,25 @@ import tensorflow as tf
 import numpy as np
 import os
 
-from superloop import Model, SGU, RegisterMemory
+import superloop
 
 
 CONFIG = {
+    'timesteps': 3, # timesteps to unroll
+    'model_name': 'Main', # name of the full model
+    'model_inputs': 7, # number of inputs at each timestep (1D tensor)
     'model_outputs': 3,
-    'recurrent_model': SGU,
+    'recurrent_model': superloop.SGU,
     'recurrent_layers': 5, # number of recurrent layers
     'recurrent_units': 3, # number of recurrent units on each layer
-    'superloop_models': [RegisterMemory], # classes used to build models used in the superloop
+    'superloop_models': [superloop.RegisterMemory], # classes used to build models used in the superloop
     'RegisterMemory': {
         'register_width': 32,
         'depth': 7,
     }
 }
 
-
-timesteps = 3
-inputs = [keras.layers.Input(shape=(7,), name="Main/StepInput{}".format(i)) for i in range(timesteps)]
-mymodelbuilder = Model(name="Main", config=CONFIG)
-outputs = [None]*timesteps
-
-for timestep in range(timesteps):
-    outputs[timestep] = mymodelbuilder.build(inputs[timestep], skip_superloop=(timestep == timesteps-1))
+(inputs, outputs) = superloop.build_model(CONFIG)
 
 model = keras.models.Model(inputs=inputs, outputs=outputs)
 model.compile(loss='categorical_crossentropy',

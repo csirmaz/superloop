@@ -94,6 +94,19 @@ class Model(Builder):
     """Builds the full model in one timestep"""
     
     def __init__(self, config, **kwargs):
+        """
+            config = {
+                'model_outputs': 3, # number of outputs at each timestep
+                'recurrent_model': SGU, # subclass of Builder
+                'recurrent_layers': 5, # number of recurrent layers
+                'recurrent_units': 3, # number of recurrent units on each layer
+                'superloop_models': [RegisterMemory], # list of SuperLoopModel subclasses 
+                    # used to build models used in the superloop
+                    
+                <sub-dicts keyed by the name of each superloop subclass;
+                <these are passed to the superloop model constructors>
+            }
+        """
 
         super().__init__(**kwargs)
 
@@ -103,7 +116,7 @@ class Model(Builder):
             for layerix in range(config['recurrent_layers'])
         ]
         
-        # The external systems connected via the superloop ("X")
+        # superloop models: the external systems connected via the superloop ("X")
         self.superloop_models = [
             modelclass(name="{}/{}".format(self.name, modelclass.__name__), config=config[modelclass.__name__])
             for modelclass in config['superloop_models']
@@ -145,3 +158,32 @@ class Model(Builder):
         return self.shared_layer(CropLayer, (), {'start':0, 'end':self.outputs, 'name':'CropOut'})(x) # output
 
 
+def build_model(config):
+    """
+        config = {
+            'timesteps': 16, # timesteps to unroll
+            'model_name': 'Main', # name of the full model
+            'model_inputs': 3, # number of inputs at each timestep (1D tensor)
+            'model_outputs': 3, # number of outputs at each timestep (1D tensor)
+            'recurrent_model': SGU, # subclass of Builder
+            'recurrent_layers': 5, # number of recurrent layers
+            'recurrent_units': 3, # number of recurrent units on each layer
+            'superloop_models': [RegisterMemory], # list of SuperLoopModel subclasses 
+                # used to build models used in the superloop
+                
+            <sub-dicts keyed by the name of each superloop subclass;
+            <these are passed to the superloop model constructors>
+        }
+    """
+    
+    inputs = [
+        keras.layers.Input(shape=(config['model_inputs'],), name="{}/StepInput{}".format(config['model_name'], i)) 
+        for i in range(config['timesteps'])
+    ]
+    builder = Model(name=config['model_name'], config=config)
+    outputs = [None] * config['timesteps']
+    
+    for timestep in range(config['timesteps']):
+        outputs[timestep] = builder.build(inputs[timestep], skip_superloop=(timestep == config['timesteps']-1))
+        
+    return (inputs, outputs)
