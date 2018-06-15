@@ -2,9 +2,10 @@
 
 This project contains:
 
-- A framework to build RNNs with a "superloop" in TensorFlow/Keras.
-- An implementation of a simple gated recurrent unit ("SGU") we use instead of LSTM or GRU cells.
-- An implementation of a register-based memory unit.
+- A framework to build RNNs with a "superloop" in TensorFlow/Keras
+- An implementation of a simple gated recurrent unit ("SGU") we use instead of LSTM or GRU cells
+- An implementation of a register-based memory unit
+- An implementation of an attention system that allows the network to move freely along the input data
 
 By "superloop" we mean an extra loop that connects the output of the RNN to
 its input in the next time step via an external system ("X").
@@ -14,7 +15,7 @@ its input in the next time step via an external system ("X").
 The external system can implement a special type of memory (derivable stack memory,
 addressable memory, etc.), an attention system, or other enhancement.
 
-## The superloop
+## The superloop (model.py)
 
 The framework implements the RNN and the superloop by unrolling both.
 The diagram below illustrates one RNN unit (LSTM, GRU, etc.) and how it is
@@ -33,7 +34,7 @@ at the same time:
 ![unrolling the superloop](https://raw.githubusercontent.com/csirmaz/superloop/master/img/superloop4.png)
 
 
-## Simple Gated Recurrent Unit (SGU)
+## Simple Gated Recurrent Unit (sgu.py)
 
 The SGU is implemented by a linear combination between the hidden state (internal input) and the (external) input, controlled
 by both inputs.
