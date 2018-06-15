@@ -99,7 +99,10 @@ class Model(Builder):
     def __init__(self, config, **kwargs):
         """
             config = {
-                'model_outputs': 3, # number of outputs at each timestep
+                'timesteps': 16, # timesteps to unroll
+                'model_name': 'Main', # name of the full model
+                'model_inputs': 3, # number of inputs at each timestep (1D tensor) or 0 to disable
+                'model_outputs': 3, # number of outputs at each timestep (1D tensor) or 0 to disable
                 'recurrent_model': SGU, # subclass of Builder
                 'recurrent_layers': 5, # number of recurrent layers
                 'recurrent_units': 3, # number of recurrent units on each layer
@@ -111,7 +114,9 @@ class Model(Builder):
             }
         """
 
-        super().__init__(**kwargs)
+        super().__init__(name=config['model_name'], **kwargs)
+        
+        self.config = config
 
         # Array of builders for the recurrent layers
         self.recurrent_layers = [
@@ -135,6 +140,7 @@ class Model(Builder):
         print("Building timestep {}...".format(self._build_counter))
         
         if self._build_counter == 0:
+            # Use 0s as the input from the superloop in the first timestep
             super_inputs = sum(s.outputs for s in self.superloop_models)
             x = self.shared_layer(ExtendWithZeros, (), {'size_added':super_inputs, 'name':'ExtendZero'})(input)
         else:
@@ -148,7 +154,8 @@ class Model(Builder):
             else:
                 x = inputs[0]
             self.skip_layer(1)
-        
+
+        # Recurrent layers        
         for rlayer in self.recurrent_layers:
             x = rlayer.build(x)
             
@@ -156,8 +163,12 @@ class Model(Builder):
             'units': self.all_outputs, 
             'name':'DenseFinal'
         })(x)
-        
-        output = self.shared_layer(CropLayer, (), {'start':0, 'end':self.outputs, 'name':'CropOut'})(x) # output
+
+        # Output: crop out data needed for the superloop models
+        if self.outputs > 0:        
+            output = self.shared_layer(CropLayer, (), {'start':0, 'end':self.outputs, 'name':'CropOut'})(x) # output
+        else:
+            output = None
 
         if skip_superloop:
             return output
@@ -170,43 +181,35 @@ class Model(Builder):
         return output
 
 
-def build_model(config):
-    """
-        config = {
-            'timesteps': 16, # timesteps to unroll
-            'model_name': 'Main', # name of the full model
-            'model_inputs': 3, # number of inputs at each timestep (1D tensor)
-            'model_outputs': 3, # number of outputs at each timestep (1D tensor)
-            'recurrent_model': SGU, # subclass of Builder
-            'recurrent_layers': 5, # number of recurrent layers
-            'recurrent_units': 3, # number of recurrent units on each layer
-            'superloop_models': [RegisterMemory], # list of SuperLoopModel subclasses 
-                # used to build models used in the superloop
-                
-            <sub-dicts keyed by the name of each superloop subclass;
-            <these are passed to the superloop model constructors>
-        }
-    """
+    def build_all(self):
+        """The main method to call to build the full model.
+        """
     
-    input = keras.layers.Input(shape=(config['timesteps'], config['model_inputs']), name="{}/Input".format(config['model_name']))
-    
-    builder = Model(name=config['model_name'], config=config)
-    outputs = [None] * config['timesteps']
-    
-    for timestep in range(config['timesteps']):
-        o = builder.build(
-            keras.layers.Lambda( # split input tensor
-                lambda x: x[:, timestep, :],
-                name="{}/CropInput{}".format(config['model_name'], timestep)
-            )(input),
-            skip_superloop=(timestep == config['timesteps']-1)
-        )
-        outputs[timestep] = keras.layers.Lambda(
-            lambda x: K.expand_dims(o, axis=-2), # (outputs) -> (1,outputs)
-            name="{}/ExpandOut{}".format(config['model_name'], timestep)
-        )(o)
+        if self.config['model_inputs'] > 0:    
+            input = keras.layers.Input(shape=(self.config['timesteps'], self.config['model_inputs']), name="{}/Input".format(self.config['model_name']))
+        else:
+            input = None
         
-    # Merge outputs
-    output = keras.layers.Concatenate(axis=-2, name="{}/ConcatOut".format(config['model_name']))(outputs)
+        outputs = [None] * self.config['timesteps']
         
-    return (input, output)
+        for timestep in range(self.config['timesteps']):
+            o = self.build(
+                keras.layers.Lambda( # split input tensor
+                    lambda x: x[:, timestep, :],
+                    name="{}/CropInput{}".format(self.config['model_name'], timestep)
+                )(input),
+                skip_superloop=(timestep == self.config['timesteps']-1)
+            )
+            if self.config['model_outputs'] > 0:
+                outputs[timestep] = keras.layers.Lambda(
+                    lambda x: K.expand_dims(o, axis=-2), # (outputs) -> (1,outputs)
+                    name="{}/ExpandOut{}".format(self.config['model_name'], timestep)
+                )(o)
+            
+        # Merge outputs
+        if self.config['model_outputs'] > 0:
+            output = keras.layers.Concatenate(axis=-2, name="{}/ConcatOut".format(self.config['model_name']))(outputs)
+        else:
+            output = None
+            
+        return (input, output)

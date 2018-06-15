@@ -22,7 +22,8 @@ CONFIG = {
     }
 }
 
-(input, output) = superloop.build_model(CONFIG)
+slmodel = superloop.Model(CONFIG)
+(input, output) = slmodel.build_all()
 
 model = keras.models.Model(inputs=input, outputs=output)
 model.compile(loss='categorical_crossentropy',

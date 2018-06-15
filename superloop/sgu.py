@@ -7,14 +7,12 @@ from .model import Builder, ExtendWithZeros, PrintTensor
 # TODO implement as layer? https://keras.io/layers/writing-your-own-keras-layers/
 
 class SGU(Builder):
-    """ Simple Gated Unit. Builds a layer of recurrent units."""
+    """Builds a layer Simple Gated Units in a way that they can be unrolled in time."""
     
     def __init__(self, units, **kwargs):
         self.units = units # number of units on the layer
         super().__init__(**kwargs)
-        # The internal input to use in the next timestep
-        # We use an input here as the first dimension (batch size) is not fixed,
-        # so we cannot use a constant tensor.
+        # The hidden state / internal input to use in the next timestep
         self.internal_var = None
 
     
@@ -59,5 +57,5 @@ class SGU(Builder):
             # (1-f)*inp + f*internal
             out = self.shared_layer(keras.layers.Lambda, ((lambda x: (1.0-x[0])*x[1] + x[0]*x[2]),), {'name':'nF_Inp_F_Int'})([f, inp, self.internal_var])
 
-        self.internal_var = out
+        self.internal_var = out # new internal / hidden state
         return out # external_output

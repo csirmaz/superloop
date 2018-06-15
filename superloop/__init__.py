@@ -1,3 +1,3 @@
-from .model import build_model
+from .model import Model
 from .sgu import SGU
 from .regmem import RegisterMemory

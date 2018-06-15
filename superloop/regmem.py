@@ -28,7 +28,7 @@ class RegisterMemory(SuperLoopModel):
             outputs=self.register_width,
             **kwargs
         )
-        self.memory = None
+        self.memory = None # The memory registers with (depth,width) shape
         
     def _build_impl_impl(self, input):
         store = self.shared_layer(CropLayer, (), {'start':0, 'end':self.depth, 'name':"CropStore"})(input)
@@ -39,7 +39,7 @@ class RegisterMemory(SuperLoopModel):
         recall = self.shared_layer(keras.layers.Softmax, (), {'name':'Softmax'})(recall)
 
         # storing = store*data
-        # sotre(depth) data(width) --> (depth,1) (1,width) --> storing(depth,width)
+        # store(depth) data(width) --> (depth,1) (1,width) --> storing(depth,width)
         storing = self.shared_layer(keras.layers.Lambda, ((
             lambda x: tf.matmul(K.expand_dims(x[0], axis=-1), K.expand_dims(x[1], axis=-2))
         ),), {'name':'Storing'})([store, data])
