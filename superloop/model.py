@@ -101,7 +101,7 @@ class Model(Builder):
             config = {
                 'timesteps': 16, # timesteps to unroll
                 'model_name': 'Main', # name of the full model
-                'model_inputs': 3, # number of inputs at each timestep (1D tensor) or 0 to disable
+                'model_inputs': 3, # number of inputs at each timestep (1D tensor)
                 'model_outputs': 3, # number of outputs at each timestep (1D tensor) or 0 to disable
                 'recurrent_model': SGU, # subclass of Builder
                 'recurrent_layers': 5, # number of recurrent layers
@@ -185,10 +185,7 @@ class Model(Builder):
         """The main method to call to build the full model.
         """
     
-        if self.config['model_inputs'] > 0:    
-            input = keras.layers.Input(shape=(self.config['timesteps'], self.config['model_inputs']), name="{}/Input".format(self.config['model_name']))
-        else:
-            input = None
+        input = keras.layers.Input(shape=(self.config['timesteps'], self.config['model_inputs']), name="{}/Input".format(self.config['model_name']))
         
         outputs = [None] * self.config['timesteps']
         
