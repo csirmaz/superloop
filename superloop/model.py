@@ -185,6 +185,7 @@ class Model(Builder):
         """The main method to call to build the full model.
         """
     
+        # The input to the RNN part
         input = keras.layers.Input(shape=(self.config['timesteps'], self.config['model_inputs']), name="{}/Input".format(self.config['model_name']))
         
         outputs = [None] * self.config['timesteps']
@@ -209,4 +210,4 @@ class Model(Builder):
         else:
             output = None
             
-        return (input, output)
+        return (input, output) # RNN input and output tensors

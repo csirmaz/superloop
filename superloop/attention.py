@@ -7,21 +7,25 @@ from .model import SuperLoopModel, ExtendWithZeros, PrintTensor
 class Attention(SuperLoopModel):
     """Implements a superloop extension that allows the system to focus on different parts of the input.
     It focuses on one data point only, but for non-integer locations, interpolates between the two data points.
+    
+    Usage:
+        self.data is an input tensor of the shape ([batch_size],datapoints,outputs)
     """
     
     def __init__(self, config, **kwargs):
         """
             {
-                'data': ... # the data to focus on (2D tensor) (datapoints,outputs)
+                'datapoints': number
+                'outputs': number
             }
         """
-        self.data = config['data']
-        self.position = None
         super().__init__(
             inputs=1, # move control
-            outputs=K.shape(self.data)[1],
+            outputs=config['outputs'],
             **kwargs
         )
+        self.data = keras.layers.Input(shape=(config['datapoints'],config['outputs']), name="{}/InputData".format(self.name))
+        self.position = None
     
     def _build_impl_impl(self, input):
         # Limit how much we can move
@@ -41,11 +45,11 @@ class Attention(SuperLoopModel):
         # We 
         
         def select_impl(x):
-            data = x[0] # (datapoints,outputs)
+            data = x[0] # (batch_size,datapoints,outputs)
             position = x[1] # (batch_size,1)
             
             # batch_size = K.shape(position)[0]
-            indices = K.arange(start=0, stop=K.shape(data)[0], dtype=position.dtype()) # (datapoints)
+            indices = K.arange(start=0, stop=K.shape(data)[0], dtype=position.dtype) # (datapoints)
             # e.g. [0., 1., 2., 3., 4., 5., 6. 7.]
             
             indices = K.expand_dims(indices, axis=1) # (datapoints,1)
@@ -64,5 +68,5 @@ class Attention(SuperLoopModel):
             masked = mask * data # (batch_size,datapoints,outputs)
             return K.sum(masked, axis=-2) # (batch_size,outputs)            
         
-        return self.shared_layer(keras.layers.Lambda, select_impl, {'name':'Select'})([self.data, self.position])
+        return self.shared_layer(keras.layers.Lambda, (select_impl,), {'name':'Select'})([self.data, self.position])
         
