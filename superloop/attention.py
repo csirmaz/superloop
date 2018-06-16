@@ -24,13 +24,14 @@ class Attention(SuperLoopModel):
             outputs=config['outputs'],
             **kwargs
         )
+        self.datapoints = config['datapoints']
         self.data = keras.layers.Input(shape=(config['datapoints'],config['outputs']), name="{}/InputData".format(self.name))
         self.position = None
     
     def _build_impl_impl(self, input):
         # Limit how much we can move
         move = self.shared_layer(keras.layers.Lambda, ((
-            lambda x: K.hard_sigmoid(x) * 2. - 1. # -1. .. 1.
+            lambda x: K.sigmoid(x) * 2. - 1. # -1. .. 1.
         ),), {'name':'SigmoidCtlr'})(input)
         
         # Add the move control to the position
@@ -42,14 +43,12 @@ class Attention(SuperLoopModel):
                 lambda x: x[0]+x[1]
             ),), {'name':'AddPosition'})([self.position, move])
 
-        # We 
-        
         def select_impl(x):
             data = x[0] # (batch_size,datapoints,outputs)
             position = x[1] # (batch_size,1)
             
             # batch_size = K.shape(position)[0]
-            indices = K.arange(start=0, stop=K.shape(data)[0], dtype=position.dtype) # (datapoints)
+            indices = K.arange(start=0, stop=self.datapoints, dtype=position.dtype) # (datapoints)
             # e.g. [0., 1., 2., 3., 4., 5., 6. 7.]
             
             indices = K.expand_dims(indices, axis=1) # (datapoints,1)

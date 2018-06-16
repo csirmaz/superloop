@@ -39,7 +39,7 @@ class SGU(Builder):
             )
             
         f = self.shared_layer(keras.layers.Dense, (), 
-            {'units':self.units, 'activation':'hard_sigmoid', 'name':'DenseCtrl'})(allin) # W1, W2
+            {'units':self.units, 'activation':'sigmoid', 'name':'DenseCtrl'})(allin) # W1, W2
         # f = PrintTensor("f=sigmoid()")(f) # DEBUG
         
         # Unfortunately, keras.layers.Subtract &c. don't have names, so the graph is unusable. We use Lambdas instead

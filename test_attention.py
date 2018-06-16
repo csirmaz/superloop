@@ -7,20 +7,20 @@ import os
 import superloop
 
 """
-Toy example for the attention superloop which should find the 2. value
+Toy example for the attention superloop which should find the last 2. value before a 9. value
 """
 
 CONFIG = {
-    'timesteps': 3, # timesteps to unroll
+    'timesteps': 64, # timesteps to unroll
     'model_name': 'Main', # name of the full model
     'model_inputs': 2, # number of inputs at each timestep (1D tensor)
     'model_outputs': 0,
     'recurrent_model': superloop.SGU,
-    'recurrent_layers': 5, # number of recurrent layers
-    'recurrent_units': 3, # number of recurrent units on each layer
+    'recurrent_layers': 8, # number of recurrent layers
+    'recurrent_units': 8, # number of recurrent units on each layer
     'superloop_models': [superloop.Attention], # classes used to build models used in the superloop
     'Attention': {
-        'datapoints': 8,
+        'datapoints': 12,
         'outputs': 1,
     }
 }
@@ -29,8 +29,8 @@ slmodel = superloop.Model(CONFIG)
 (input, dummy_output) = slmodel.build_all()
 
 model = keras.models.Model(inputs=[input, slmodel.superloop_models[0].data], outputs=slmodel.superloop_models[0].position)
-model.compile(loss='categorical_crossentropy',
-              optimizer='rmsprop',
+model.compile(loss='mean_squared_error',
+              optimizer='adagrad',
               metrics=['accuracy'])
 model.summary()
 
@@ -46,36 +46,41 @@ tensorboardcb = keras.callbacks.TensorBoard(
     # write_images=True
 )
 
-print(input.shape)
+samples = 1024*128
+datapoints = CONFIG['Attention']['datapoints']
+data = np.zeros((samples, datapoints,1))
+target = np.zeros((samples,))
+for sample in range(samples):
+    peak = np.random.randint(0, datapoints-1)+1
+    solution = np.random.randint(0, peak)
+    for d in range(datapoints):
+        if d < solution:
+            v = np.random.randint(0, 5) # any value
+        elif d == solution:
+            v = 2.
+        elif d < peak:
+            v = np.random.randint(0, 4)
+            if v >= 2.:
+                v += 1.
+        elif d == peak:
+            v = 9.
+        else:
+            v = np.random.randint(0, 5) # any value
 
-data = np.array([
-           [[0.], [0.], [0.], [0.], [0.], [0.], [0.], [2.]],
-           [[2.], [0.], [0.], [0.], [0.], [0.], [0.], [0.]],
-           [[3.], [2.], [0.], [0.], [0.], [0.], [0.], [0.]],
-           [[3.], [0.], [0.], [0.], [0.], [0.], [0.], [2.]],
-           [[1.], [0.], [0.], [0.], [0.], [0.], [2.], [0.]],
-           [[1.], [0.], [0.], [0.], [0.], [0.], [2.], [3.]],
-           [[1.], [0.], [2.], [0.], [0.], [0.], [0.], [3.]],
-           [[1.], [0.], [2.], [3.], [0.], [0.], [0.], [3.]],
-           [[2.], [0.], [1.], [3.], [0.], [0.], [0.], [3.]],
-       ])
+        data[sample][d][0] = v
+    target[sample] = solution
+
+# for x in range(samples):        
+#     print(data[x])
+#     print(target[x])
 
 model.fit(
     x=[
        np.zeros((data.shape[0], input.shape[1], input.shape[2])),
        data
     ],
-    y=np.array([
-        7.,
-        0.,
-        1.,
-        7.,
-        6.,
-        6.,
-        2.,
-        2.,
-        0.
-    ]),
+    y=target,
+    epochs=40000,
     callbacks=[tensorboardcb]
 )
 
