@@ -54,7 +54,8 @@ class Attention(SuperLoopModel):
             indices = K.expand_dims(indices, axis=1) # (datapoints,1)
             position = K.expand_dims(position, axis=-2) # (batch_size,1,1)
             
-            mask = K.minimum(K.maximum(position-indices, 0.), K.maximum(indices+2.-position, 0.)) # (batch_size,datapoints,1)
+            # TODO Why not position-indices -/+ 1?
+            ## mask = K.minimum(K.maximum(position-indices, 0.), K.maximum(indices+2.-position, 0.)) # (batch_size,datapoints,1)
             #            ooo       ***
             #               ooo ***
             #                **|oo
@@ -63,6 +64,10 @@ class Attention(SuperLoopModel):
             #       -----|-----|-----|-----|-----
             #
             # result e.g. [.0, .0, .0, .2, .8, .0, .0]
+            
+            ## Version without 0 grad regions
+            diff = position - indices
+            mask = 1. / (1. + diff * diff)
             
             masked = mask * data # (batch_size,datapoints,outputs)
             return K.sum(masked, axis=-2) # (batch_size,outputs)            

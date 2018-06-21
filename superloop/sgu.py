@@ -44,7 +44,8 @@ class SGU(Builder):
         
         # Unfortunately, keras.layers.Subtract &c. don't have names, so the graph is unusable. We use Lambdas instead
         inp = self.shared_layer(keras.layers.Dense, (), 
-            {'units':self.units, 'activation':'relu', 'name':'DenseIn'})(external_input) # W3
+            {'units':self.units, 'name':'DenseIn'})(external_input) # W3
+        inp = self.shared_layer(keras.layers.LeakyReLU, (), {'alpha':0.1, 'name':'ReLU'})(inp)
         # inp = PrintTensor("relu(inp)")(inp) # DEBUG
         
         if self._build_counter == 0:
