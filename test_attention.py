@@ -16,7 +16,7 @@ CONFIG = {
     'model_inputs': 2, # number of inputs at each timestep (1D tensor)
     'model_outputs': 0,
     'recurrent_model': superloop.SGU,
-    'recurrent_layers': 8, # number of recurrent layers
+    'recurrent_layers': 16, # number of recurrent layers
     'recurrent_units': 8, # number of recurrent units on each layer
     'superloop_models': [superloop.Attention], # classes used to build models used in the superloop
     'Attention': {
@@ -30,11 +30,11 @@ slmodel = superloop.Model(CONFIG)
 
 model = keras.models.Model(inputs=[input, slmodel.superloop_models[0].data], outputs=slmodel.superloop_models[0].position)
 model.compile(loss='mean_squared_error',
-              optimizer='adagrad',
+              optimizer=keras.optimizers.RMSprop(lr=0.0004),
               metrics=['accuracy'])
 model.summary()
 
-TensorboardDir = "{}/tensorboard_logs/superloop_attn".format(os.environ['HOME'])
+TensorboardDir = "{}/tensorboard_logs/superloop_attn_rmsprop_leak_slow_big".format(os.environ['HOME'])
 os.system("mkdir -p {}".format(TensorboardDir))
 
 # https://keras.io/callbacks/#tensorboard
