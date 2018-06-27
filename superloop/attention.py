@@ -1,6 +1,5 @@
 import keras
 from keras import backend as K
-import tensorflow as tf
 
 from .model import SuperLoopModel, ExtendWithZeros, PrintTensor
 
@@ -40,7 +39,7 @@ class Attention(SuperLoopModel):
             self.skip_layer()
         else:
             self.position = self.shared_layer(keras.layers.Lambda, ((
-                lambda x: x[0]+x[1]
+                lambda x: x[0] + x[1]
             ),), {'name':'AddPosition'})([self.position, move])
 
         def select_impl(x):
@@ -54,18 +53,7 @@ class Attention(SuperLoopModel):
             indices = K.expand_dims(indices, axis=1) # (datapoints,1)
             position = K.expand_dims(position, axis=-2) # (batch_size,1,1)
             
-            # TODO Why not position-indices -/+ 1?
-            ## mask = K.minimum(K.maximum(position-indices, 0.), K.maximum(indices+2.-position, 0.)) # (batch_size,datapoints,1)
-            #            ooo       ***
-            #               ooo ***
-            #                **|oo
-            #             ***     ooo
-            # (p-i) ******           ooooooooooo (i+2-p)
-            #       -----|-----|-----|-----|-----
-            #
-            # result e.g. [.0, .0, .0, .2, .8, .0, .0]
-            
-            ## Version without 0 grad regions
+            # Version without 0 grad regions
             diff = position - indices
             mask = 1. / (1. + diff * diff)
             
