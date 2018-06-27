@@ -22,11 +22,16 @@ CONFIG = {
     'Attention': {
         'datapoints': 12,
         'outputs': 1,
-    }
+    },
+    'samples': 1024*128, # number of samples in generated dataset
+    'epochs': 1000,
+    'model_file': 'out.h5'
 }
 
 slmodel = superloop.Model(CONFIG)
 (input, dummy_output) = slmodel.build_all()
+
+# slmodel.load_weights(CONFIG['model_file'])
 
 model = keras.models.Model(inputs=[input, slmodel.superloop_models[0].data], outputs=slmodel.superloop_models[0].position)
 model.compile(loss='mean_squared_error',
@@ -34,7 +39,10 @@ model.compile(loss='mean_squared_error',
               metrics=['accuracy'])
 model.summary()
 
-TensorboardDir = "{}/tensorboard_logs/superloop_attn_rmsprop_leak_slow_big2".format(os.environ['HOME'])
+
+# Callbacks
+
+TensorboardDir = "{}/tensorboard_logs/superloop_attn_save".format(os.environ['HOME'])
 os.system("mkdir -p {}".format(TensorboardDir))
 
 # https://keras.io/callbacks/#tensorboard
@@ -46,7 +54,26 @@ tensorboardcb = keras.callbacks.TensorBoard(
     # write_images=True
 )
 
-samples = 1024*128
+
+class MyCallback(keras.callbacks.Callback):
+    """Custom training callback"""
+
+    def __init__(self):
+        super(MyCallback, self).__init__()
+        self.loss = None
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        
+        # Save model
+        if self.loss is None or self.loss > logs['loss']:
+            print("Better loss! {} Saving model".format(logs['loss']))
+            self.loss = logs['loss']
+            slmodel.save_weights(CONFIG['model_file'])
+
+
+# Generate training data
+samples = CONFIG['samples']
 datapoints = CONFIG['Attention']['datapoints']
 data = np.zeros((samples, datapoints,1))
 target = np.zeros((samples,))
@@ -70,9 +97,6 @@ for sample in range(samples):
         data[sample][d][0] = v
     target[sample] = solution
 
-# for x in range(samples):        
-#     print(data[x])
-#     print(target[x])
 
 model.fit(
     x=[
@@ -80,9 +104,6 @@ model.fit(
        data
     ],
     y=target,
-    epochs=40000,
-    callbacks=[tensorboardcb]
+    epochs=CONFIG['epochs'],
+    callbacks=[MyCallback(), tensorboardcb]
 )
-
- 
-

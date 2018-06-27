@@ -1,6 +1,5 @@
 import keras
 from keras import backend as K
-import tensorflow as tf
 
 from .model import Builder, ExtendWithZeros, PrintTensor
 
@@ -39,12 +38,11 @@ class SGU(Builder):
             )
             
         f = self.shared_layer(keras.layers.Dense, (), 
-            {'units':self.units, 'activation':'sigmoid', 'name':'DenseCtrl'})(allin) # W1, W2
+            {'units':self.units, 'activation':'sigmoid', 'name':'DenseCtrl'}, save=True)(allin) # W1, W2
         # f = PrintTensor("f=sigmoid()")(f) # DEBUG
         
-        # Unfortunately, keras.layers.Subtract &c. don't have names, so the graph is unusable. We use Lambdas instead
         inp = self.shared_layer(keras.layers.Dense, (), 
-            {'units':self.units, 'name':'DenseIn'})(external_input) # W3
+            {'units':self.units, 'name':'DenseIn'}, save=True)(external_input) # W3
         inp = self.shared_layer(keras.layers.LeakyReLU, (), {'alpha':0.1, 'name':'ReLU'})(inp)
         # inp = PrintTensor("relu(inp)")(inp) # DEBUG
         
