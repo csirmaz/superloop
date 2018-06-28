@@ -20,18 +20,23 @@ CONFIG = {
     'recurrent_units': 16, # number of recurrent units on each layer
     'superloop_models': [superloop.Attention], # classes used to build models used in the superloop
     'Attention': {
-        'datapoints': 12,
+        'datapoints': 16,
         'outputs': 1,
     },
-    'samples': 1024*128, # number of samples in generated dataset
-    'epochs': 1000,
-    'model_file': 'out.h5'
+    'steps_per_epoch': 256,
+    'batch_size': 64,
+    'epochs': 10000,
+    'tensorboard_logs': '{}/tensorboard_logs/superloop_attn_save2',
+    'model_file': 'out2.h5',
+    'save_model': True,
+    'load_model': False
 }
 
 slmodel = superloop.Model(CONFIG)
 (input, dummy_output) = slmodel.build_all()
 
-# slmodel.load_weights(CONFIG['model_file'])
+if CONFIG['load_model']:
+    slmodel.load_weights(CONFIG['model_file'])
 
 model = keras.models.Model(inputs=[input, slmodel.superloop_models[0].data], outputs=slmodel.superloop_models[0].position)
 model.compile(loss='mean_squared_error',
@@ -42,7 +47,7 @@ model.summary()
 
 # Callbacks
 
-TensorboardDir = "{}/tensorboard_logs/superloop_attn_save".format(os.environ['HOME'])
+TensorboardDir = CONFIG['tensorboard_logs'].format(os.environ['HOME'])
 os.system("mkdir -p {}".format(TensorboardDir))
 
 # https://keras.io/callbacks/#tensorboard
@@ -67,43 +72,60 @@ class MyCallback(keras.callbacks.Callback):
         
         # Save model
         if self.loss is None or self.loss > logs['loss']:
-            print("Better loss! {} Saving model".format(logs['loss']))
+            print("Better loss! {}".format(logs['loss']))
             self.loss = logs['loss']
-            slmodel.save_weights(CONFIG['model_file'])
+            if CONFIG['save_model']:
+                print("Saving model")
+                slmodel.save_weights(CONFIG['model_file'])
+                print("Saving done")
 
 
 # Generate training data
-samples = CONFIG['samples']
-datapoints = CONFIG['Attention']['datapoints']
-data = np.zeros((samples, datapoints,1))
-target = np.zeros((samples,))
-for sample in range(samples):
-    peak = np.random.randint(0, datapoints-1)+1
-    solution = np.random.randint(0, peak)
-    for d in range(datapoints):
-        if d < solution:
-            v = np.random.randint(0, 5) # any value
-        elif d == solution:
-            v = 2.
-        elif d < peak:
-            v = np.random.randint(0, 4)
-            if v >= 2.:
-                v += 1.
-        elif d == peak:
-            v = 9.
-        else:
-            v = np.random.randint(0, 5) # any value
+class DataIterator:
+    """Generate random training data
+    
+        This consists of lists of (datapoints) numbers...
+    """
+    def __init__(self, batch_size, datapoints, dummyin):
+        self.batch_size = batch_size
+        self.datapoints = datapoints
+        self.dummyin = dummyin
+        
+    def __next__(self): 
+        data = np.zeros((self.batch_size, self.datapoints, 1))
+        target = np.zeros((self.batch_size,))
+        for batch in range(self.batch_size):
+            peak = np.random.randint(0, self.datapoints-1)+1
+            solution = np.random.randint(0, peak)
+            for d in range(self.datapoints):
+                if d < solution:
+                    v = np.random.randint(0, 5) # any value
+                elif d == solution:
+                    v = 2
+                elif d < peak:
+                    v = np.random.randint(0, 4)
+                    if v >= 2:
+                        v += 1
+                elif d == peak:
+                    v = 9
+                else:
+                    v = np.random.randint(0, 5) # any value
 
-        data[sample][d][0] = v
-    target[sample] = solution
+                data[batch][d][0] = v
+            target[batch] = solution
+            
+        return ([self.dummyin, data], target)
 
 
-model.fit(
-    x=[
-       np.zeros((data.shape[0], input.shape[1], input.shape[2])),
-       data
-    ],
-    y=target,
+dummyin = np.zeros((CONFIG['batch_size'], input.shape[1], input.shape[2]))
+my_data = DataIterator(batch_size=CONFIG['batch_size'], datapoints=CONFIG['Attention']['datapoints'], dummyin=dummyin)
+
+model.fit_generator(
+    generator=my_data,
+    steps_per_epoch=CONFIG['steps_per_epoch'],
     epochs=CONFIG['epochs'],
+    verbose=1,
+    workers=2,
+    use_multiprocessing=True,
     callbacks=[MyCallback(), tensorboardcb]
 )
