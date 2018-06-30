@@ -1,7 +1,7 @@
 import keras
 from keras import backend as K
 
-from .model import SuperLoopModel, ExtendWithZeros, PrintTensor
+from .model import SuperLoopModel, ExtendWithZeros
 
 class Attention(SuperLoopModel):
     """Implements a superloop extension that allows the system to focus on different parts of the input.
@@ -10,6 +10,8 @@ class Attention(SuperLoopModel):
     Usage:
         self.data is an input tensor of the shape ([batch_size],datapoints,outputs)
     """
+    
+    # TODO Provide the current location as an output. Limit the location to the length of the data.
     
     def __init__(self, config, **kwargs):
         """
@@ -41,6 +43,8 @@ class Attention(SuperLoopModel):
             self.position = self.shared_layer(keras.layers.Lambda, ((
                 lambda x: x[0] + x[1]
             ),), {'name':'AddPosition'})([self.position, move])
+            
+        self.position = self.print_layer(self.position, "Attn_Position")
 
         def select_impl(x):
             data = x[0] # (batch_size,datapoints,outputs)
@@ -60,5 +64,7 @@ class Attention(SuperLoopModel):
             masked = mask * data # (batch_size,datapoints,outputs)
             return K.sum(masked, axis=-2) # (batch_size,outputs)            
         
-        return self.shared_layer(keras.layers.Lambda, (select_impl,), {'name':'Select'})([self.data, self.position])
+        out = self.shared_layer(keras.layers.Lambda, (select_impl,), {'name':'Select'})([self.data, self.position])
+        out = self.print_layer(out, "Attn_Out")
+        return out
         

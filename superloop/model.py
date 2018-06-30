@@ -1,6 +1,7 @@
 import abc
 import keras
 from keras import backend as K
+import tensorflow as tf
 import numpy as np
 import pickle
 import h5py
@@ -10,9 +11,11 @@ class Builder:
     and set up weight sharing between the same layers in different timesteps.
     Abstract class"""
 
-    def __init__(self, name):
+    def __init__(self, name, printvalues):
         assert name # We need a name to be able to save/load layers
         self.name = name # Name of the model
+        self.printvalues = printvalues # Bool
+        
         self._shared_layers = {} # layer cache, keyed on _layer_counter
         self._layers_to_save = {} # layers that can be saved, keyed on name
         self._layer_counter = 0
@@ -21,6 +24,18 @@ class Builder:
     def generate_name(self, name):
         """Returns a name for a layer"""
         return "{}/{}.{}".format(self.name, self._layer_counter, name)
+        
+    def print_layer(self, layer, label):
+        """Optionally add a step to the network that prints values from the tensor"""
+        if self.printvalues:
+            # The message is machine readable
+            name = "{}/{}.{}.{}".format(self.name, self._layer_counter, '{}'+label, self._build_counter)
+            message = "<<{}>>".format(name.format(''))
+            # We generate a new layer in each timestep
+            # As a hack, we pass self.printvalues as the maximum size
+            return keras.layers.Lambda((lambda x: tf.Print(x, [x], message=message, first_n=-1, summarize=self.printvalues)), name=name.format('Print_'))(layer)
+        else:
+            return layer
         
     def shared_layer(self, build_function, args, kwargs, skip_cache=False, save=False):
         """Either create a layer shared between all units, or return one from the cache"""
@@ -42,8 +57,7 @@ class Builder:
         if save:
             self._layers_to_save[fullname] = layer
         
-        if not skip_cache:
-            self._layer_counter += 1
+        self._layer_counter += 1
         return layer
 
     def skip_layer(self, count=1):
@@ -105,11 +119,6 @@ def ExtendWithZeros(size_added, name=None):
     return keras.layers.Lambda(func, name=name)
 
 
-def PrintTensor(message):
-    """Create a layer that prints the tensor"""
-    return keras.layers.Lambda(lambda x: K.print_tensor(x, message=message))
-
-
 class SuperLoopModel(Builder):
     """Builds a model used in the superloop. Abstract class."""
     
@@ -135,7 +144,7 @@ class SuperLoopModel(Builder):
 class Model(Builder):
     """Builds the full model in one timestep"""
     
-    def __init__(self, config, **kwargs):
+    def __init__(self, config):
         """
             config = {
                 'timesteps': 16, # timesteps to unroll
@@ -147,25 +156,26 @@ class Model(Builder):
                 'recurrent_units': 3, # number of recurrent units on each layer
                 'superloop_models': [RegisterMemory], # list of SuperLoopModel subclasses 
                     # used to build models used in the superloop
+                'printvalues': False, # whether to print some tensor values. If yes, use an int which is the maximum number of values displayed
                     
                 <sub-dicts keyed by the name of each superloop subclass;
                 <these are passed to the superloop model constructors>
             }
         """
 
-        super().__init__(name=config['model_name'], **kwargs)
+        super().__init__(name=config['model_name'], printvalues=config['printvalues'])
         
         self.config = config
 
         # Array of builders for the recurrent layers
         self.recurrent_layers = [
-            config['recurrent_model'](units=config['recurrent_units'], name="{}/Recur{}".format(self.name, layerix)) 
+            config['recurrent_model'](units=config['recurrent_units'], name="{}/Recur{}".format(self.name, layerix), printvalues=config['printvalues']) 
             for layerix in range(config['recurrent_layers'])
         ]
         
         # superloop models: the external systems connected via the superloop ("X")
         self.superloop_models = [
-            modelclass(name="{}/{}".format(self.name, modelclass.__name__), config=config[modelclass.__name__])
+            modelclass(name="{}/{}".format(self.name, modelclass.__name__), printvalues=config['printvalues'], config=config[modelclass.__name__])
             for modelclass in config['superloop_models']
         ]
         

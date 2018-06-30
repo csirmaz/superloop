@@ -1,7 +1,7 @@
 import keras
 from keras import backend as K
 
-from .model import Builder, ExtendWithZeros, PrintTensor
+from .model import Builder, ExtendWithZeros
 
 # TODO implement as layer? https://keras.io/layers/writing-your-own-keras-layers/
 
@@ -55,6 +55,9 @@ class SGU(Builder):
             self.skip_layer(1) # Order is important - Cache the correct layer
             # (1-f)*inp + f*internal
             out = self.shared_layer(keras.layers.Lambda, ((lambda x: (1.0-x[0])*x[1] + x[0]*x[2]),), {'name':'nF_Inp_F_Int'})([f, inp, self.internal_var])
+
+        # During visualization, we display the internal state
+        out = self.print_layer(out, "SGU_Internal")
 
         self.internal_var = out # new internal / hidden state
         return out # external_output
