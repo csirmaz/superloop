@@ -3,6 +3,8 @@ from keras import backend as K
 import tensorflow as tf
 import numpy as np
 import os
+import json
+import argparse
 
 import superloop
 
@@ -10,14 +12,23 @@ import superloop
 Toy example for the attention superloop which should find the last 2. value before a 9. value
 """
 
+Parser = argparse.ArgumentParser(description='Toy example for superloop with attention')
+Parser.add_argument('--one', nargs='?', const=True, help='Model1')
+Parser.add_argument('--two', nargs='?', const=True, help='Model2')
+Parser.add_argument('--save', nargs='?', const=True, help='Save')
+Parser.add_argument('--load', nargs='?', const=True, help='Load')
+Args = Parser.parse_args()
+
+modelid = 'one' if Args.one else 'two'
+
 CONFIG = {
-    'timesteps': 64, # timesteps to unroll
+    'timesteps': 64 if Args.one else 48, # timesteps to unroll
     'model_name': 'Main', # name of the full model
     'model_inputs': 2, # number of inputs at each timestep (1D tensor)
     'model_outputs': 0,
     'recurrent_model': superloop.SGU,
-    'recurrent_layers': 32, # number of recurrent layers
-    'recurrent_units': 16, # number of recurrent units on each layer
+    'recurrent_layers': 32 if Args.one else 48, # number of recurrent layers
+    'recurrent_units': 16 if Args.one else 12, # number of recurrent units on each layer
     'superloop_models': [superloop.Attention], # classes used to build models used in the superloop
     'Attention': {
         'datapoints': 16,
@@ -26,16 +37,17 @@ CONFIG = {
     'steps_per_epoch': 256,
     'batch_size': 64,
     'epochs': 10000,
-    'tensorboard_logs': '{}/tensorboard_logs/superloop_attn_save2',
-    'model_file': 'out2.h5',
-    'save_model': True,
-    'load_model': False
+    'tensorboard_logs': '{}/tensorboard_logs/superloop_attn_'+('save' if Args.save else ('load' if Args.load else 'x'))+'_'+modelid,
+    'model_file': 'out_{}.h5'.format(modelid),
+    'save_model': Args.save,
+    'load_model': Args.load
 }
 
 slmodel = superloop.Model(CONFIG)
 (input, dummy_output) = slmodel.build_all()
 
 if CONFIG['load_model']:
+    print("Loading weights")
     slmodel.load_weights(CONFIG['model_file'])
 
 model = keras.models.Model(inputs=[input, slmodel.superloop_models[0].data], outputs=slmodel.superloop_models[0].position)
@@ -75,7 +87,7 @@ class MyCallback(keras.callbacks.Callback):
             print("Better loss! {}".format(logs['loss']))
             self.loss = logs['loss']
             if CONFIG['save_model']:
-                print("Saving model")
+                print("Saving model {} into {}".format(modelid, CONFIG['model_file']))
                 slmodel.save_weights(CONFIG['model_file'])
                 print("Saving done")
 
