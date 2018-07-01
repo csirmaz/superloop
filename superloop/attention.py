@@ -1,5 +1,6 @@
 import keras
 from keras import backend as K
+import numpy as np
 
 from .model import SuperLoopModel, ExtendWithZeros
 
@@ -12,6 +13,7 @@ class Attention(SuperLoopModel):
     """
     
     # TODO Provide the current location as an output. Limit the location to the length of the data.
+    # TODO Initialize weights & bias controlling this model so that initially it would step forward.
     
     def __init__(self, config, **kwargs):
         """
@@ -28,6 +30,14 @@ class Attention(SuperLoopModel):
         self.datapoints = config['datapoints']
         self.data = keras.layers.Input(shape=(config['datapoints'],config['outputs']), name="{}/InputData".format(self.name))
         self.position = None
+
+    def init_dense(self, layer):
+        # Here we initialise the input Dense layer so that we would mostly go forward
+        # We know input and output are 1D
+        layer.set_weights([
+            np.random.uniform(low=0.0, high=0.1, size=(layer.get_input_shape_at(0)[1], layer.get_output_shape_at(0)[1])), # weights - low
+            np.array([0.9]) # bias - high
+        ])
     
     def _build_impl_impl(self, input):
         # Limit how much we can move

@@ -18,6 +18,7 @@ class Builder:
         
         self._shared_layers = {} # layer cache, keyed on _layer_counter
         self._layers_to_save = {} # layers that can be saved, keyed on name
+        self._layers_to_init = [] # array of layers to initialise
         self._layer_counter = 0
         self._build_counter = 0
         
@@ -37,8 +38,12 @@ class Builder:
         else:
             return layer
         
-    def shared_layer(self, build_function, args, kwargs, skip_cache=False, save=False):
-        """Either create a layer shared between all units, or return one from the cache"""
+    def shared_layer(self, build_function, args, kwargs, skip_cache=False, save=False, initfn=None, initfnkwargs=None):
+        """Either create a layer shared between all units, or return one from the cache
+            skip_cache: bool, if True, don't store the layer in the cache, but still increment _layer_counter
+            save: bool, if True, weights from the layer can be saved and loaded
+            initfn: None or callable, if callable, call this on the layer when created
+        """
 
         assert 'name' in kwargs # We need a name to be able to save/load layers
         fullname = self.generate_name(kwargs['name'])
@@ -48,7 +53,9 @@ class Builder:
         if skip_cache or key not in self._shared_layers:
             # Build the layer
             kwargs['name'] = fullname
-            layer = build_function(*args, **kwargs)    
+            layer = build_function(*args, **kwargs)
+            if initfn:
+                self._layers_to_init.append({'layer':layer, 'initfn':initfn, 'initfnkwargs':initfnkwargs}) 
             if not skip_cache:
                 self._shared_layers[key] = layer
         else:
@@ -68,6 +75,14 @@ class Builder:
         """Build the model"""
         self._layer_counter = 0
         r = self._build_impl(*args, **kwargs)
+        
+        if self._build_counter == 0:
+            for initlayer in self._layers_to_init:
+                if initlayer['initfnkwargs']:
+                    initlayer['initfn'](initlayer['layer'], **initlayer['initfnkwargs'])
+                else:
+                    initlayer['initfn'](initlayer['layer'])
+        
         self._build_counter += 1
         return r
 
@@ -129,6 +144,10 @@ class SuperLoopModel(Builder):
         super().__init__(**kwargs)
 
         self.out = None # Always contains the output of the latest build
+        
+    def init_dense(self, layer, inputs):
+        """Called on the dense layer preceding the input, making it possible to initialise it"""
+        pass
 
     def _build_impl(self, input): # TODO Abstract method
         """Implements building the unit itself using shared_layer()"""
@@ -227,22 +246,23 @@ class Model(Builder):
         # Recurrent layers        
         for rlayer in self.recurrent_layers:
             x = rlayer.build(x)
-            
-        x = self.shared_layer(keras.layers.Dense, (), {'units': self.all_outputs, 'name':'DenseFinal'}, save=True)(x)
-
-        # Output: crop out data needed for the superloop models
+        
         if self.outputs > 0:
-            output = self.shared_layer(CropLayer, (), {'start':0, 'end':self.outputs, 'name':'CropOut'})(x) # output
+            output = self.shared_layer(keras.layers.Dense, (), {'units': self.outputs, 'name':'DenseOutMain'}, save=True)(x)
         else:
             output = None
 
         if skip_superloop:
             return output
 
-        start = self.outputs
-        for s in self.superloop_models:        
-            s.build(self.shared_layer(CropLayer, (), {'start':start, 'end':start+s.inputs, 'name':"Crop{}".format(type(s).__name__)})(x))
-            start += s.inputs
+        for s in self.superloop_models:
+            s.build(self.shared_layer(
+                keras.layers.Dense, 
+                (), 
+                {'units':s.inputs, 'name':"DenseOut{}".format(type(s).__name__)}, 
+                save=True, 
+                initfn=s.init_dense
+            )(x))
 
         return output
 
