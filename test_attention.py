@@ -13,10 +13,11 @@ Toy example for the attention superloop which should find the last 2. value befo
 """
 
 Parser = argparse.ArgumentParser(description='Toy example for superloop with attention')
-Parser.add_argument('--one', nargs='?', const=True, help='Use model config 1')
-Parser.add_argument('--two', nargs='?', const=True, help='Use model config 2')
+Parser.add_argument('--multigpu', nargs='?', help='Use multiple GPUs; give number of GPUs')
 Parser.add_argument('--eval', nargs='?', const=True, help='Evaluate')
 Parser.add_argument('--train', nargs='?', const=True, help='Train')
+Parser.add_argument('--one', nargs='?', const=True, help='Use model config 1')
+Parser.add_argument('--two', nargs='?', const=True, help='Use model config 2')
 Args = Parser.parse_args()
 
 modelid = 'one' if Args.one else 'two'
@@ -35,12 +36,12 @@ CONFIG = {
         'datapoints': 16,
         'outputs': 1,
     },
-    'steps_per_epoch': 256 if Args.one else 64,
-    'batch_size': 1 if Args.eval else (64 if Args.one else 1024),
+    'steps_per_epoch': 64,
+    'batch_size': 1 if Args.eval else 16*1024,
     'epochs': 10000,
-    'tensorboard_logs': '{}/tensorboard_logs/superloop_attn_4_'+modelid,
+    'tensorboard_logs': '{}/tensorboard_logs/superloop_attn_5_init',
     'save_model_file': None,
-    'load_model_file': 'out_3.h5'
+    'load_model_file': None
 }
 
 slmodel = superloop.Model(CONFIG)
@@ -51,6 +52,10 @@ if CONFIG['load_model_file']:
     slmodel.load_weights(CONFIG['load_model_file'])
 
 model = keras.models.Model(inputs=[input, slmodel.superloop_models[0].data], outputs=slmodel.superloop_models[0].position)
+
+if Args.multigpu:
+    model = keras.utils.multi_gpu_model(model, gpus=int(Args.multigpu))
+
 model.compile(loss='mean_squared_error',
               optimizer=keras.optimizers.RMSprop(lr=0.0004),
               metrics=['accuracy'])
@@ -93,6 +98,7 @@ class MyCallback(keras.callbacks.Callback):
 
 
 # Generate training data
+# TODO Try one-hot encoding
 class DataIterator:
     """Generate random training data
     
