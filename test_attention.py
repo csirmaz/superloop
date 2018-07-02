@@ -2,6 +2,7 @@ import keras
 from keras import backend as K
 import tensorflow as tf
 import numpy as np
+import time
 import os
 import json
 import argparse
@@ -21,6 +22,7 @@ Parser.add_argument('--two', nargs='?', const=True, help='Use model config 2')
 Args = Parser.parse_args()
 
 modelid = 'one' if Args.one else 'two'
+timestamp = time.strftime("%Y-%m-%d-%H:%M:%S", time.gmtime())
 
 CONFIG = {
     'timesteps': 64, # timesteps to unroll
@@ -37,10 +39,11 @@ CONFIG = {
         'outputs': 1,
     },
     'steps_per_epoch': 64,
-    'batch_size': 1 if Args.eval else 16*1024,
+    'batch_size': 1 if Args.eval else 1024, # contributes to memory usage
     'epochs': 10000,
-    'tensorboard_logs': '{}/tensorboard_logs/superloop_attn_5_init',
-    'save_model_file': None,
+    'tensorboard_logs': '{}/tensorboard_logs/superloop_'+timestamp,
+    'save_model_file': 'out_'+timestamp+'.h5',
+    'save_json_file': 'out_'+timestamp+'.json',
     'load_model_file': None
 }
 
@@ -94,6 +97,7 @@ class MyCallback(keras.callbacks.Callback):
             if CONFIG['save_model_file']:
                 print("Saving model {} into {}".format(modelid, CONFIG['save_model_file']))
                 slmodel.save_weights(CONFIG['save_model_file'])
+                json.dump({'loss':self.loss}, open(CONFIG['save_json_file'], 'w'))
                 print("Saving done")
 
 
