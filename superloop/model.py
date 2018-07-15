@@ -284,20 +284,20 @@ class Model(Builder):
     
         # The input to the RNN part
         if self.config['model_inputs'] > 0:
-            input = keras.layers.Input(shape=(self.config['timesteps'], self.config['model_inputs']), name="{}/Input".format(self.config['model_name']))
+            rnninput = keras.layers.Input(shape=(self.config['timesteps'], self.config['model_inputs']), name="{}/Input".format(self.config['model_name']))
         else:
-            input = None
+            rnninput = None
         
         outputs = [None] * self.config['timesteps']
         
         for timestep in range(self.config['timesteps']):
-            if input is None:
+            if rnninput is None:
                 stepinput = None
             else:
                 stepinput = keras.layers.Lambda( # see 'input' of _build_impl. Split the input tensor
                     lambda x: x[:, timestep, :],
                     name="{}/CropInput{}".format(self.config['model_name'], timestep)
-                )(input)
+                )(rnninput)
 
             o = self.build(stepinput, skip_superloop=(timestep == self.config['timesteps']-1))
             if self.config['model_outputs'] > 0:
@@ -308,8 +308,8 @@ class Model(Builder):
             
         # Merge outputs
         if self.config['model_outputs'] > 0:
-            output = keras.layers.Concatenate(axis=-2, name="{}/ConcatOut".format(self.config['model_name']))(outputs)
+            rnnoutput = keras.layers.Concatenate(axis=-2, name="{}/ConcatOut".format(self.config['model_name']))(outputs)
         else:
-            output = None
+            rnnoutput = None
             
-        return (input, output) # RNN input and output tensors
+        return (rnninput, rnnoutput) # RNN input and output tensors
