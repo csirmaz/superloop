@@ -123,19 +123,15 @@ def CropLayer(start, end, step=1, name=None):
     # Could use K.slice but unsure how to manage batch dimension
 
 
-def GetZeros(batch_size, size):
-    """Returns a tensor of 0s of the given size"""
-    zeros = K.zeros((1, size))
-    return K.tile(zeros, (batch_size, 1))
-
-
 def ExtendWithZeros(size_added, name=None):
     """Creates a layer that adds size_added 0's to a 1D tensor in all batches"""
     # This automatically infers the batch size from the shape of the input
     # See https://stackoverflow.com/questions/46465813/creating-constant-value-in-keras
     def func(x):
         batch_size = K.shape(x)[0]
-        return K.concatenate([x, GetZeros(batch_size=batch_size, size=size_added)])
+        zeros = K.zeros((1, size_added))
+        tiledzeros = K.tile(zeros, (batch_size, 1))
+        return K.concatenate([x, tiledzeros])
     return keras.layers.Lambda(func, name=name)
 
 
@@ -173,9 +169,8 @@ class Model(Builder):
             config = {
                 'timesteps': 16, # timesteps to unroll
                 'model_name': 'Main', # name of the full model
-                'model_inputs': 3, # number of inputs at each timestep (1D tensor) or 0 to disable, in which case batch_size must be given
+                'model_inputs': 3, # number of inputs at each timestep (1D tensor) or 0 to disable, in which case still use the returned input as an input and set to 0
                 'model_outputs': 3, # number of outputs at each timestep (1D tensor) or 0 to disable
-                'batch_size': 64, # must be given if model_inputs==0
                 'recurrent_model': SGU, # subclass of Builder
                 'recurrent_layers': 5, # number of recurrent layers
                 'recurrent_units': 3, # number of recurrent units on each layer
@@ -205,6 +200,7 @@ class Model(Builder):
         ]
         
         self.outputs = config['model_outputs']
+        self.noinput_input = None # set to the initial input from the superloop if model_inputs==0
         self.all_outputs = self.outputs + sum(s.inputs for s in self.superloop_models)
 
 
@@ -231,15 +227,14 @@ class Model(Builder):
     def _build_impl(self, input, skip_superloop=False):
         """Implements building the model in one timestep"""
         
-        print("Building timestep {}...".format(self._build_counter))
-        
         if self._build_counter == 0:
             # Use 0s as the input from the superloop in the first timestep
             super_inputs = sum(s.outputs for s in self.superloop_models)
             if input is not None:
                 x = self.shared_layer(ExtendWithZeros, (), {'size_added':super_inputs, 'name':'ExtendZero'})(input)
             else:
-                x = GetZeros(batch_size=self.config['batch_size'], size=super_inputs)
+                self.noinput_input = keras.layers.Input(shape=(super_inputs,), name="{}/NoInputInput".format(self.config['model_name']))
+                x = self.noinput_input
                 self.skip_layer(1)
         else:
             inputs = []
@@ -289,8 +284,11 @@ class Model(Builder):
             rnninput = None
         
         outputs = [None] * self.config['timesteps']
-        
+    
+        print("All timesteps: {}".format(self.config['timesteps']))    
         for timestep in range(self.config['timesteps']):
+            print("Building timestep {}...".format(self._build_counter))
+        
             if rnninput is None:
                 stepinput = None
             else:
@@ -312,4 +310,8 @@ class Model(Builder):
         else:
             rnnoutput = None
             
+        if self.config['model_inputs'] == 0:
+            # We return the dummy input here that is the input from the superloop in timestep 0.
+            # No combination of Lamba, Input, K.constant, K.zeros, &c. worked.
+            rnninput = self.noinput_input
         return (rnninput, rnnoutput) # RNN input and output tensors
