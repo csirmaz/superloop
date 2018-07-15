@@ -15,9 +15,12 @@ class RegisterMemory(SuperLoopModel):
         - data (width)
         
     memory (depth,width)
-        
-    memory[t] = (1-store)*memory[t-1] + store*data   (uses matrix multiplication)
-    out = recall*memory[t]  (uses element-wise multiplication)
+    
+    (depth,width)   (depth)   (depth,width)   (depth) (width)
+    memory[t]     = (1-store)*memory[t-1]   + store  *data   (uses matrix multiplication)
+    
+    (width)   (depth) (depth,width)
+    out     = recall *memory[t]     (uses element-wise multiplication)
     """
     
     def __init__(self, config, **kwargs):

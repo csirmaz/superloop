@@ -14,7 +14,7 @@ class Builder:
     def __init__(self, name, printvalues):
         assert name # We need a name to be able to save/load layers
         self.name = name # Name of the model
-        self.printvalues = printvalues # Bool
+        self.printvalues = printvalues # False or number (should be bool)
         
         self._shared_layers = {} # layer cache, keyed on _layer_counter
         self._layers_to_save = {} # layers that can be saved, keyed on name
@@ -123,14 +123,19 @@ def CropLayer(start, end, step=1, name=None):
     # Could use K.slice but unsure how to manage batch dimension
 
 
+def GetZeros(batch_size, size):
+    """Returns a tensor of 0s of the given size"""
+    zeros = K.zeros((1, size))
+    return K.tile(zeros, (batch_size, 1))
+
+
 def ExtendWithZeros(size_added, name=None):
     """Creates a layer that adds size_added 0's to a 1D tensor in all batches"""
+    # This automatically infers the batch size from the shape of the input
     # See https://stackoverflow.com/questions/46465813/creating-constant-value-in-keras
     def func(x):
-        zeros = K.zeros((1, size_added))
         batch_size = K.shape(x)[0]
-        tiled_zeros = K.tile(zeros, (batch_size, 1))
-        return K.concatenate([x, tiled_zeros])
+        return K.concatenate([x, GetZeros(batch_size=batch_size, size=size_added)])
     return keras.layers.Lambda(func, name=name)
 
 
@@ -145,7 +150,7 @@ class SuperLoopModel(Builder):
 
         self.out = None # Always contains the output of the latest build
         
-    def init_dense(self, layer, inputs):
+    def init_dense(self, layer):
         """Called on the dense layer preceding the input, making it possible to initialise it"""
         pass
 
@@ -168,8 +173,9 @@ class Model(Builder):
             config = {
                 'timesteps': 16, # timesteps to unroll
                 'model_name': 'Main', # name of the full model
-                'model_inputs': 3, # number of inputs at each timestep (1D tensor)
+                'model_inputs': 3, # number of inputs at each timestep (1D tensor) or 0 to disable, in which case batch_size must be given
                 'model_outputs': 3, # number of outputs at each timestep (1D tensor) or 0 to disable
+                'batch_size': 64, # must be given if model_inputs==0
                 'recurrent_model': SGU, # subclass of Builder
                 'recurrent_layers': 5, # number of recurrent layers
                 'recurrent_units': 3, # number of recurrent units on each layer
@@ -230,9 +236,14 @@ class Model(Builder):
         if self._build_counter == 0:
             # Use 0s as the input from the superloop in the first timestep
             super_inputs = sum(s.outputs for s in self.superloop_models)
-            x = self.shared_layer(ExtendWithZeros, (), {'size_added':super_inputs, 'name':'ExtendZero'})(input)
+            if input is not None:
+                x = self.shared_layer(ExtendWithZeros, (), {'size_added':super_inputs, 'name':'ExtendZero'})(input)
+            else:
+                x = GetZeros(batch_size=self.config['batch_size'], size=super_inputs)
+                self.skip_layer(1)
         else:
-            inputs = [input]
+            inputs = []
+            if input is not None: inputs.append(input)
             inputs.extend(s.out for s in self.superloop_models)
             if len(inputs) > 1:
                 x = keras.layers.concatenate(
@@ -272,18 +283,23 @@ class Model(Builder):
         """
     
         # The input to the RNN part
-        input = keras.layers.Input(shape=(self.config['timesteps'], self.config['model_inputs']), name="{}/Input".format(self.config['model_name']))
+        if self.config['model_inputs'] > 0:
+            input = keras.layers.Input(shape=(self.config['timesteps'], self.config['model_inputs']), name="{}/Input".format(self.config['model_name']))
+        else:
+            input = None
         
         outputs = [None] * self.config['timesteps']
         
         for timestep in range(self.config['timesteps']):
-            o = self.build(
-                keras.layers.Lambda( # see 'input' of _build_impl. Split the input tensor
+            if input is None:
+                stepinput = None
+            else:
+                stepinput = keras.layers.Lambda( # see 'input' of _build_impl. Split the input tensor
                     lambda x: x[:, timestep, :],
                     name="{}/CropInput{}".format(self.config['model_name'], timestep)
-                )(input),
-                skip_superloop=(timestep == self.config['timesteps']-1)
-            )
+                )(input)
+
+            o = self.build(stepinput, skip_superloop=(timestep == self.config['timesteps']-1))
             if self.config['model_outputs'] > 0:
                 outputs[timestep] = keras.layers.Lambda(
                     lambda x: K.expand_dims(o, axis=-2), # (outputs) -> (1,outputs)

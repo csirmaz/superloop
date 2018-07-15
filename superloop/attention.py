@@ -18,8 +18,8 @@ class Attention(SuperLoopModel):
     def __init__(self, config, **kwargs):
         """
             {
-                'datapoints': number
-                'outputs': number
+                'datapoints': number (length)
+                'outputs': number (width)
             }
         """
         super().__init__(
