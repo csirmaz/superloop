@@ -285,9 +285,8 @@ class Model(Builder):
         
         outputs = [None] * self.config['timesteps']
     
-        print("All timesteps: {}".format(self.config['timesteps']))    
         for timestep in range(self.config['timesteps']):
-            print("Building timestep {}...".format(self._build_counter))
+            print("Building timestep {}/{}...".format(self._build_counter + 1, self.config['timesteps']))
         
             if rnninput is None:
                 stepinput = None
