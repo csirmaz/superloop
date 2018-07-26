@@ -7,27 +7,54 @@ import pickle
 import h5py
 
 class Builder:
-    """(Re)Builds models from cached layers. Used to build unrolled models
-    and set up weight sharing between the same layers in different timesteps.
-    Abstract class"""
+    """Builder objects can be called multiple times to build uniform parts of a model.
+    
+    A Builder object can be used to (re)build uniform, repeated parts of a model,
+    optionally reusing the same layers. This way, Builder objects can build
+    unrolled RNN models and set up weight sharing between the sme layers in
+    different timesteps.
+    
+    This is an abstract class; a subclass must implement _build_impl that
+    contains the recipe for building the model part.
+    """
+
 
     def __init__(self, name, printvalues):
+        """Constructor.
+
+        Arguments:
+        - name -- the name of the model
+        - printvalues -- False or a number. If a number, the tensors on 
+            which print_layer is called is dispayed while the model is
+            evaluated. Max printvalues values are displayed from the tensor.
+        """
         assert name # We need a name to be able to save/load layers
         self.name = name # Name of the model
-        self.printvalues = printvalues # False or number (should be bool)
+        self.printvalues = printvalues # False or number TODO: should be bool
         
-        self._shared_layers = {} # layer cache, keyed on _layer_counter
-        self._layers_to_save = {} # layers that can be saved, keyed on name
+        self._shared_layers = {} # layer cache, keyed on _layer_counter TODO: key on name?
+        self._layers_to_save = {} # layers weights of which canbe saved, keyed on their name
         self._layers_to_init = [] # array of layers to initialise
-        self._layer_counter = 0
+        self._layer_counter = 0 # shared layer index, reset at each build
         self._build_counter = 0
+
         
     def generate_name(self, name):
-        """Returns a name for a layer"""
+        """Returns a unique name for a shared layer.
+
+        Arguments:
+        - name -- the name of the layer
+        """
         return "{}/{}.{}".format(self.name, self._layer_counter, name)
+
         
     def print_layer(self, layer, label):
-        """Optionally add a step to the network that prints values from the tensor"""
+        """Optionally add a step to the network that prints the values from the tensor.
+
+        Arguments:
+        - layer - the input tensor
+        - label - a label to display in the output and in the layer name
+        """
         if self.printvalues:
             # The message is machine readable
             name = "{}/{}.{}.{}".format(self.name, self._layer_counter, '{}'+label, self._build_counter)
@@ -37,12 +64,18 @@ class Builder:
             return keras.layers.Lambda((lambda x: tf.Print(x, [x], message=message, first_n=-1, summarize=self.printvalues)), name=name.format('Print_'))(layer)
         else:
             return layer
+
         
     def shared_layer(self, build_function, args, kwargs, skip_cache=False, save=False, initfn=None, initfnkwargs=None):
-        """Either create a layer shared between all units, or return one from the cache
-            skip_cache: bool, if True, don't store the layer in the cache, but still increment _layer_counter
-            save: bool, if True, weights from the layer can be saved and loaded
-            initfn: None or callable, if callable, call this on the layer when created
+        """Either create a layer shared between builds, or return one from the cache.
+        
+        Arguments:
+        - build_function -- function to call if the layer is to be built
+        - args -- positional arguments for build_function
+        - kwargs -- keyword arguments for build_function. Must contain 'name'
+        - skip_cache -- bool; if True, don't store the layer in the cache, but still increment _layer_counter
+        - save -- bool; if True, weights from the layer can be saved and loaded
+        - initfn -- None or callable; if callable, call this on the layer when it is created
         """
 
         assert 'name' in kwargs # We need a name to be able to save/load layers
@@ -52,7 +85,7 @@ class Builder:
 
         if skip_cache or key not in self._shared_layers:
             # Build the layer
-            kwargs['name'] = fullname
+            kwargs['name'] = fullname # Automatically enhance the name
             layer = build_function(*args, **kwargs)
             if initfn:
                 self._layers_to_init.append({'layer':layer, 'initfn':initfn, 'initfnkwargs':initfnkwargs}) 
@@ -67,15 +100,26 @@ class Builder:
         self._layer_counter += 1
         return layer
 
+
     def skip_layer(self, count=1):
-        """Call this method if a shared layer is optional to ensure that later layers use the correct key"""
+        """Increment the layer counter by count.
+        
+        If a shared layer is used in an optional branch of the recipe, use skip_layer in
+        the other branch to ensure that the layer index (counter) is consisent regardless
+        of the branch taken.
+        """
         self._layer_counter += count
 
+
     def build(self, *args, **kwargs):
-        """Build the model"""
+        """Build the model once.
+        
+        All arguments are forwarded to _build_impl.
+        """
         self._layer_counter = 0
         r = self._build_impl(*args, **kwargs)
-        
+    
+        # Call the init functions    
         if self._build_counter == 0:
             for initlayer in self._layers_to_init:
                 if initlayer['initfnkwargs']:
@@ -168,9 +212,10 @@ class Model(Builder):
         """
             config = {
                 'timesteps': 16, # timesteps to unroll
+                'suppress_output': 8, # suppress RNN output for this many timesteps at the beginning
                 'model_name': 'Main', # name of the full model
-                'model_inputs': 3, # number of inputs at each timestep (1D tensor) or 0 to disable, in which case still use the returned input as an input and set to 0
-                'model_outputs': 3, # number of outputs at each timestep (1D tensor) or 0 to disable
+                'model_inputs': 3, # number of RNN inputs at each timestep (1D tensor) or 0 to disable, in which case still use the returned input as an input and set to 0
+                'model_outputs': 3, # number of RNN outputs at each timestep (1D tensor) or 0 to disable
                 'recurrent_model': SGU, # subclass of Builder
                 'recurrent_layers': 5, # number of recurrent layers
                 'recurrent_units': 3, # number of recurrent units on each layer
@@ -201,7 +246,6 @@ class Model(Builder):
         
         self.outputs = config['model_outputs']
         self.noinput_input = None # set to the initial input from the superloop if model_inputs==0
-        self.all_outputs = self.outputs + sum(s.inputs for s in self.superloop_models)
 
 
     def save_weights(self, h5filename):
@@ -230,7 +274,7 @@ class Model(Builder):
         if self._build_counter == 0:
             # Use 0s as the input from the superloop in the first timestep
             super_inputs = sum(s.outputs for s in self.superloop_models)
-            if input is not None:
+            if input is not None: # some RNN inputs exist
                 x = self.shared_layer(ExtendWithZeros, (), {'size_added':super_inputs, 'name':'ExtendZero'})(input)
             else:
                 self.noinput_input = keras.layers.Input(shape=(super_inputs,), name="{}/NoInputInput".format(self.config['model_name']))
@@ -238,7 +282,7 @@ class Model(Builder):
                 self.skip_layer(1)
         else:
             inputs = []
-            if input is not None: inputs.append(input)
+            if input is not None: inputs.append(input) # RNN inputs exist
             inputs.extend(s.out for s in self.superloop_models)
             if len(inputs) > 1:
                 x = keras.layers.concatenate(
@@ -253,10 +297,11 @@ class Model(Builder):
         for rlayer in self.recurrent_layers:
             x = rlayer.build(x)
         
-        if self.outputs > 0:
+        if self.outputs > 0 and self._build_counter >= self.config['suppress_output']:
             output = self.shared_layer(keras.layers.Dense, (), {'units': self.outputs, 'name':'DenseOutMain'}, save=True)(x)
         else:
             output = None
+            self.skip_layer(1)
 
         if skip_superloop:
             return output
@@ -283,7 +328,7 @@ class Model(Builder):
         else:
             rnninput = None
         
-        outputs = [None] * self.config['timesteps']
+        outputs = [None] * (self.config['timesteps'] - self.config['suppress_output'])
     
         for timestep in range(self.config['timesteps']):
             print("Building timestep {}/{}...".format(self._build_counter + 1, self.config['timesteps']))
@@ -297,8 +342,8 @@ class Model(Builder):
                 )(rnninput)
 
             o = self.build(stepinput, skip_superloop=(timestep == self.config['timesteps']-1))
-            if self.config['model_outputs'] > 0:
-                outputs[timestep] = keras.layers.Lambda(
+            if self.config['model_outputs'] > 0 and timestep >= self.config['suppress_output']:
+                outputs[timestep - self.config['suppress_output']] = keras.layers.Lambda(
                     lambda x: K.expand_dims(o, axis=-2), # (outputs) -> (1,outputs)
                     name="{}/ExpandOut{}".format(self.config['model_name'], timestep)
                 )(o)
