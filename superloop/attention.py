@@ -7,22 +7,37 @@ from .builder import SuperLoopModel, ExtendWithZeros
 
 class Attention(SuperLoopModel):
     """Implements a superloop extension that allows the system to focus on different parts of the input.
-    It focuses on one data point only, but for non-integer locations, interpolates between the two data points.
+    
+    The data the model operates on has N data locations, each of which is a 1D tensor.
+    The model maintains an index that can be modified by at most -1. or 1. in each step.
+    Its output is the same size as the data at one datapoint, and it combines the datapoint
+    the index selects with the neighboring ones with a factor of 1/(1+d^2) where d
+    is the distance between the index and the location of the datapoint.
+    
+    Inputs of the model:
+    - control -- one value that changes the index (after applying a sigmoid).
+    Outputs of the model:
+    - a tensor of the same size as a datapoint ("outputs").
+    
+    The model uses no functions that has regions of 0 derivative to allow training.
+    It also preinitialises the dense layer that provides the control value
+    with a large bias so that initially, the model would visit each datapoint.
     
     Usage:
-        self.data is an input tensor of the shape ([batch_size],datapoints,outputs)
+        self.data must be used as an input of the shape ([batch_size],datapoints,outputs)
     """
     
     # TODO Provide the current location as an output. Limit the location to the length of the data.
-    # TODO Initialize weights & bias controlling this model so that initially it would step forward.
     
     def __init__(self, config, **kwargs):
-        """
-            {
-                'datapoints': number (length)
-                'outputs': number (width)
-            }
-        """
+        """Constructor.
+        
+        Arguments:
+        - config -- a dict with the following keys:
+            - 'datapoints' -- int; the length
+            - 'outputs' -- int; the size of each datapoint, or width
+        - any extra keyword arguments are passed to the superclass constructor.
+        """        
         super().__init__(
             inputs=1, # move control
             outputs=config['outputs'],
@@ -32,15 +47,25 @@ class Attention(SuperLoopModel):
         self.data = keras.layers.Input(shape=(config['datapoints'],config['outputs']), name="{}/InputData".format(self.name))
         self.position = None
 
+
     def init_dense(self, layer):
+        """Initialises the dense layers providing the control input."""
+
         # Here we initialise the input Dense layer so that we would mostly go forward
         # We know input and output are 1D
         layer.set_weights([
             np.random.uniform(low=0.0, high=0.1, size=(layer.get_input_shape_at(0)[1], layer.get_output_shape_at(0)[1])), # weights - low
             np.array([0.9]) # bias - high
         ])
+
     
     def _build_impl_impl(self, input):
+        """Internal method. Implements building the unit itself using shared_layer().
+        
+        Arguments:
+        - input -- tensor; all inputs to the model
+        """
+
         # Limit how much we can move
         move = self.shared_layer(keras.layers.Lambda, ((
             lambda x: K.sigmoid(x) * 2. - 1. # -1. .. 1.
@@ -78,4 +103,3 @@ class Attention(SuperLoopModel):
         out = self.shared_layer(keras.layers.Lambda, (select_impl,), {'name':'Select'})([self.data, self.position])
         out = self.print_layer(out, "Attn_Out")
         return out
-        

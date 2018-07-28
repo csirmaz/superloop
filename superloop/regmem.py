@@ -6,14 +6,20 @@ from .builder import SuperLoopModel, CropLayer
 
 
 class RegisterMemory(SuperLoopModel):
-    """Implements a memory of (depth) registers, each (register_width) wide.
-    Inputs:
-        - data (width)
-        - store control (depth)
-        - recall control (depth)
-    Outputs:
-        - data (width)
-        
+    """Implements a memory of multiple registers that can be used as an external system in a superloop.
+    
+    There are D ("depth") registers, each W ("width") wide. The RNN part of the model can
+    control writing and reading the registers, and receives the data read in the next timestep.
+    
+    Inputs of the model:
+        - data (W) -- this is stored in the selected register(s)
+        - store control (D) -- these control which register is written (a softmax is applied)
+        - recall control (D) -- these control which register is read (a softmax is applied)
+    Outputs of the model:
+        - data (W) -- the data read from the registers
+    """
+    
+    """    
     memory (depth,width)
     
     (depth,width)   (depth)   (depth,width)   (depth) (width)
@@ -24,6 +30,14 @@ class RegisterMemory(SuperLoopModel):
     """
     
     def __init__(self, config, **kwargs):
+        """Constructor.
+        
+        Arguments:
+        - config -- a dict with the following keys:
+            - 'register_width' -- the size of each register
+            - 'depth' -- the number of registers
+        - any extra keyword arguments are passed to the superclass constructor.
+        """        
         self.register_width = config['register_width']
         self.depth = config['depth']
         super().__init__(
@@ -32,8 +46,14 @@ class RegisterMemory(SuperLoopModel):
             **kwargs
         )
         self.memory = None # The memory registers with (depth,width) shape
-        
+
+
     def _build_impl_impl(self, input):
+        """Internal method. Implements building the unit itself using shared_layer().
+        
+        Arguments:
+        - input -- tensor; all inputs to the model
+        """
         store = self.shared_layer(CropLayer, (), {'start':0, 'end':self.depth, 'name':"CropStore"})(input)
         recall = self.shared_layer(CropLayer, (), {'start':self.depth, 'end':self.depth*2, 'name':"CropRecall"})(input)
         data = self.shared_layer(CropLayer, (), {'start':self.depth*2, 'end':self.inputs, 'name':"CropData"})(input)

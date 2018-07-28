@@ -7,9 +7,18 @@ from .builder import Builder, ExtendWithZeros
 # TODO implement as layer? https://keras.io/layers/writing-your-own-keras-layers/
 
 class SGU(Builder):
-    """Builds a layer Simple Gated Units in a way that they can be unrolled in time."""
+    """Builds a layer of Simple Gated Units (SGUs) in a way that they can be unrolled in time.
+    
+    See README.md for a description of its structure.
+    """
     
     def __init__(self, units, **kwargs):
+        """Constructor.
+        
+        Arguments:
+        - units -- int; the number of units on the layer.
+        - any extra keyword arguments are passed to the superclass constructor.
+        """
         self.units = units # number of units on the layer
         super().__init__(**kwargs)
         # The hidden state / internal input to use in the next timestep
@@ -17,7 +26,11 @@ class SGU(Builder):
 
     
     def _build_impl(self, external_input):
-        """Implements building the unit itself using shared_layer()"""
+        """Internal method. Implements building the unit itself using shared_layer().
+        
+        Arguments:
+        - external_input -- tensor; the input to the SGU (which is not its state from the previous timestep).
+        """
         
         # We implement a simple gated unit here
         # The output and next hidden/internal value are controlled by F:

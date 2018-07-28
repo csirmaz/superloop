@@ -47,13 +47,10 @@ class Model(Builder):
             - 'recurrent_model' -- string; name of model class to use to build the RNN part, e.g. 'SGU'
             - 'recurrent_layers' -- int; number of recurrent layers in the RNN part
             - 'recurrent_units' -- int; number of recurrent units on each layer in the RNN part
-                'superloop_models': [RegisterMemory], # list of SuperLoopModel subclass names 
-                    # used to build models used in the superloop
-                'printvalues': False, # whether to print some tensor values. If yes, use an int which is the maximum number of values displayed
-                    
-                <sub-dicts keyed by the name of each superloop subclass;
-                <these are passed to the superloop model constructors>
-            }
+            - 'superloop_models' -- array of strings; list of the names of SuperLoopModel subclasses to add to the model
+            - 'printvalues' -- optional; False or int -- whether to activate print_layer nodes and print tensor values.
+                If yes, use an int which is the maximum number of values (numbers) displayed.
+            - '<SuperLoopModel class name>' (multiple) -- dict; these dicts are passed to the SuperLoopModel constructors
         """
 
         super().__init__(name=config['model_name'], printvalues=config['printvalues'])
@@ -77,7 +74,13 @@ class Model(Builder):
 
 
     def save_weights(self, h5filename):
-        """Save weights from the model in a hdf5 file"""
+        """Save weights from the model in a hdf5 file.
+        
+        This saves weights from shared layers constructed with save=True.
+        
+        Arguments:
+        - h5filename -- string; file name
+        """
         h5file = h5py.File(h5filename, "w")
         self._save_local_weights(h5file)
         for s in self.superloop_models:
@@ -87,7 +90,13 @@ class Model(Builder):
         
     
     def load_weights(self, h5filename):
-        """Load and overwrite weights in the model from a hdf5 file"""
+        """Load and overwrite weights in the model from a hdf5 file.
+        
+        This loads weights for shared layers constructed with save=True.
+        
+        Arguments:
+        - h5filename -- string; file name
+        """
         h5file = h5py.File(h5filename, "r")
         self._load_local_weights(h5file)
         for s in self.superloop_models:
@@ -97,7 +106,12 @@ class Model(Builder):
 
         
     def _build_impl(self, input, skip_superloop=False):
-        """Implements building the model in one timestep"""
+        """Internal method. Implements building one timestep of the full model.
+        
+        Arguments:
+        - input -- the RNN input tensor for this timestep
+        - skip_superloop -- optional; bool; whether to skip constructing SuperLoopModels
+        """
         
         if self._build_counter == 0:
             # Use 0s as the input from the superloop in the first timestep
@@ -148,6 +162,14 @@ class Model(Builder):
 
     def build_all(self):
         """The main method to call to build the full model.
+        
+        Pass the returned input and output tensors, along with any other tensors needed,
+        to the Model constructor of Keras.
+        
+        Returns:
+        - rnninput -- the input tensor for the RNN in all timesteps, or a dummy tensor that must be set to 0
+            if the RNN uses no inputs (in this case, this is the placeholder for the input from the superloop in step 0).
+        - rnnoutput -- the output tensor for the RNN in all timesteps (except suppress_output).
         """
     
         # The input to the RNN part
@@ -176,7 +198,7 @@ class Model(Builder):
                     name="{}/ExpandOut{}".format(self.config['model_name'], timestep)
                 )(o)
             
-        # Merge outputs
+        # Merge the RNN outputs
         if self.config['model_outputs'] > 0:
             rnnoutput = keras.layers.Concatenate(axis=-2, name="{}/ConcatOut".format(self.config['model_name']))(outputs)
         else:
@@ -184,6 +206,6 @@ class Model(Builder):
             
         if self.config['model_inputs'] == 0:
             # We return the dummy input here that is the input from the superloop in timestep 0.
-            # No combination of Lamba, Input, K.constant, K.zeros, &c. worked.
+            # No combination of Lamba, Input, K.constant, K.zeros, &c. worked to provide a constant.
             rnninput = self.noinput_input
         return (rnninput, rnnoutput) # RNN input and output tensors

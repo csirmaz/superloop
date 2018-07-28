@@ -1,11 +1,6 @@
 # superloop
 
-This project contains:
-
-- A framework to build RNNs with a "superloop" in TensorFlow/Keras
-- An implementation of a simple gated recurrent unit ("SGU") we use instead of LSTM or GRU cells
-- An implementation of a register-based memory unit
-- An implementation of an attention system that allows the network to move freely along the input data
+An implementation of "superloops" around recurrent neural networks (RNNs).
 
 A "superloop" is an extra loop that connects the output of the RNN to
 its input in the next timestep via one or more external systems ("X").
@@ -14,6 +9,13 @@ its input in the next timestep via one or more external systems ("X").
 
 The external system can implement a special type of memory (derivable stack memory,
 addressable memory, etc.), an attention system, or other enhancement.
+
+This project contains:
+
+- A framework to build RNNs with a "superloop" in TensorFlow/Keras
+- An implementation of a simple gated recurrent unit ("SGU") we use instead of LSTM or GRU cells in the RNN
+- An implementation of a register-based memory unit
+- An implementation of an attention system that allows the network to move freely along the input data
 
 ## The superloop framework
 
@@ -37,7 +39,7 @@ at the same time:
 again and again, while reusing the layers themselves. This makes it possible to build
 an unrolled model easily.
 
-The **Model** class is used by client code. It implements the recipe for building the full model.
+The **Model** class is used by client code. It implements the (configurable) recipe for building the full model.
 
 ## "Simple Gated Recurrent Unit" (SGU)
 
