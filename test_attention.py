@@ -26,13 +26,14 @@ timestamp = time.strftime("%Y-%m-%d-%H:%M:%S", time.gmtime())
 
 CONFIG = {
     'timesteps': 64, # timesteps to unroll
+    'suppress_output': 0,
     'model_name': 'Main', # name of the full model
     'model_inputs': 2, # number of inputs at each timestep (1D tensor)
     'model_outputs': 0,
-    'recurrent_model': superloop.SGU,
+    'recurrent_model': 'SGU',
     'recurrent_layers': 32, # number of recurrent layers
     'recurrent_units': 16, # number of recurrent units on each layer
-    'superloop_models': [superloop.Attention], # classes used to build models used in the superloop
+    'superloop_models': ['Attention'], # classes used to build models used in the superloop
     'printvalues': 1024 if Args.eval else False,
     'Attention': {
         'datapoints': 16,

@@ -1,7 +1,8 @@
 import keras
 from keras import backend as K
 
-from .model import Builder, ExtendWithZeros
+from .builder import Builder, ExtendWithZeros
+
 
 # TODO implement as layer? https://keras.io/layers/writing-your-own-keras-layers/
 

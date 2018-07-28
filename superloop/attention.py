@@ -2,7 +2,8 @@ import keras
 from keras import backend as K
 import numpy as np
 
-from .model import SuperLoopModel, ExtendWithZeros
+from .builder import SuperLoopModel, ExtendWithZeros
+
 
 class Attention(SuperLoopModel):
     """Implements a superloop extension that allows the system to focus on different parts of the input.

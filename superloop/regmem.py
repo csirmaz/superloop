@@ -2,7 +2,7 @@ import keras
 from keras import backend as K
 import tensorflow as tf
 
-from .model import SuperLoopModel, CropLayer
+from .builder import SuperLoopModel, CropLayer
 
 
 class RegisterMemory(SuperLoopModel):
