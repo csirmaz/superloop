@@ -58,8 +58,8 @@ class RegisterMemory(SuperLoopModel):
         recall = self.shared_layer(CropLayer, (), {'start':self.depth, 'end':self.depth*2, 'name':"CropRecall"})(input)
         data = self.shared_layer(CropLayer, (), {'start':self.depth*2, 'end':self.inputs, 'name':"CropData"})(input)
         
-        store = self.shared_layer(keras.layers.Softmax, (), {'name':'Softmax'})(store)
-        recall = self.shared_layer(keras.layers.Softmax, (), {'name':'Softmax'})(recall)
+        store = self.shared_layer(keras.layers.Softmax, (), {'name':'Softmax'})(store) # {NONLIN}
+        recall = self.shared_layer(keras.layers.Softmax, (), {'name':'Softmax'})(recall) # {NONLIN}
 
         # storing = store*data
         # store(depth) data(width) --> (depth,1) (1,width) --> storing(depth,width)

@@ -52,12 +52,13 @@ class SGU(Builder):
             )
             
         f = self.shared_layer(keras.layers.Dense, (), 
-            {'units':self.units, 'activation':'sigmoid', 'name':'DenseCtrl'}, save=True)(allin) # W1, W2
+            {'units':self.units, 'activation':'softsign', 'name':'DenseCtrl'}, save=True)(allin) # W1, W2 {NONLIN}
+        f = self.shared_layer(keras.layers.Lambda, ((lambda x: (x[0] + 1.) / 2.),), {'name':'DenseCtrl2'})([f])
         # f = PrintTensor("f=sigmoid()")(f) # DEBUG
         
         inp = self.shared_layer(keras.layers.Dense, (), 
             {'units':self.units, 'name':'DenseIn'}, save=True)(external_input) # W3
-        inp = self.shared_layer(keras.layers.LeakyReLU, (), {'alpha':0.1, 'name':'ReLU'})(inp)
+        inp = self.shared_layer(keras.layers.LeakyReLU, (), {'alpha':0.1, 'name':'ReLU'})(inp) # {NONLIN}
         # inp = PrintTensor("relu(inp)")(inp) # DEBUG
         
         if self._build_counter == 0:

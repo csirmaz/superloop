@@ -68,8 +68,8 @@ class Attention(SuperLoopModel):
 
         # Limit how much we can move
         move = self.shared_layer(keras.layers.Lambda, ((
-            lambda x: K.sigmoid(x) * 2. - 1. # -1. .. 1.
-        ),), {'name':'SigmoidCtlr'})(input)
+            lambda x: K.softsign(x) # -1. .. 1. {NONLIN}
+        ),), {'name':'NonLinCtlr'})(input)
         
         # Add the move control to the position
         if self._build_counter == 0:
@@ -95,7 +95,7 @@ class Attention(SuperLoopModel):
             
             # Version without 0 grad regions
             diff = position - indices
-            mask = 1. / (1. + diff * diff)
+            mask = 1. / (1. + K.abs(diff)) # {NONLIN}
             
             masked = mask * data # (batch_size,datapoints,outputs)
             return K.sum(masked, axis=-2) # (batch_size,outputs)            
